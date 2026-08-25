@@ -105,31 +105,31 @@ export default class CitationGraphPlugin extends Plugin {
 
     this.addCommand({
       id: "create-from-collection",
-      name: "Create from Collection",
+      name: "Create from collection",
       callback: () => this.createFromCollection(),
     });
 
     this.addCommand({
       id: "create-from-tag",
-      name: "Create from Tag",
+      name: "Create from tag",
       callback: () => this.createFromTag(),
     });
 
     this.addCommand({
       id: "expand-paper",
-      name: "Expand Paper",
+      name: "Expand paper",
       callback: () => this.expandPaper(),
     });
 
     this.addCommand({
       id: "expand-paper-refresh",
-      name: "Expand Paper (Force Refresh)",
+      name: "Expand paper (force refresh)",
       callback: () => this.expandPaper({ forceRefresh: true }),
     });
 
     this.addCommand({
       id: "clear-s2-cache",
-      name: "Clear Semantic Scholar Cache",
+      name: "Clear Semantic Scholar cache",
       callback: async () => {
         this.s2Cache.clear();
         await this.s2Cache.save();
@@ -139,13 +139,13 @@ export default class CitationGraphPlugin extends Plugin {
 
     this.addCommand({
       id: "relayout-canvas",
-      name: "Relayout Canvas",
+      name: "Relayout canvas",
       callback: () => this.relayoutCanvas(),
     });
 
     this.addCommand({
       id: "sync-to-zotero",
-      name: "Sync Canvas to Zotero",
+      name: "Sync canvas to Zotero",
       callback: () => this.syncToZotero(),
     });
 
@@ -157,43 +157,43 @@ export default class CitationGraphPlugin extends Plugin {
 
     this.addCommand({
       id: "add-paper-by-doi",
-      name: "Add Paper by DOI or arXiv",
+      name: "Add paper by DOI or arXiv",
       callback: () => this.addPaperByDoi(),
     });
 
     this.addCommand({
       id: "refresh-reading-status",
-      name: "Refresh Reading Status",
+      name: "Refresh reading status",
       callback: () => this.refreshReadingStatus(),
     });
 
     this.addCommand({
       id: "set-paper-status",
-      name: "Set Paper Status",
+      name: "Set paper status",
       callback: () => this.setPaperStatus(),
     });
 
     this.addCommand({
       id: "toggle-read-status",
-      name: "Cycle Reading Status",
+      name: "Cycle reading status",
       callback: () => this.cycleReadingStatus(),
     });
 
     this.addCommand({
       id: "send-papers-to-canvas",
-      name: "Send Papers to Canvas",
+      name: "Send papers to canvas",
       callback: () => this.sendPapersToCanvas(),
     });
 
     this.addCommand({
       id: "write-summary",
-      name: "Write Summary",
+      name: "Write summary",
       callback: () => this.writeSummary(),
     });
 
     this.addCommand({
       id: "delete-paper",
-      name: "Delete Paper",
+      name: "Delete paper",
       callback: () => this.deletePaper(),
     });
   }
@@ -294,10 +294,8 @@ export default class CitationGraphPlugin extends Plugin {
       const picker = new CollectionPickerModal(this.app);
       const collection = await picker.pickCollection();
       if (!collection) {
-        console.log("Citation Graph: no collection selected");
         return;
       }
-      console.log("Citation Graph: selected collection", collection.data.name);
 
       logNotice(`Fetching items from "${collection.data.name}"...`);
 
@@ -329,7 +327,6 @@ export default class CitationGraphPlugin extends Plugin {
       const picker = new TagPickerModal(this.app);
       const result = await picker.pickTags();
       if (!result) {
-        console.log("Citation Graph: no tags selected");
         return;
       }
       const displayName = result.tags.join(" + ");
@@ -655,8 +652,6 @@ export default class CitationGraphPlugin extends Plugin {
           doi, arxivId, s2Id, this.settings,
           { s2: this.s2Client, openalex: this.openAlexClient, crossref: this.crossRefClient },
         );
-        console.log("Citation Graph: multi-source result",
-          multiResult ? `refs=${multiResult.references.length} cites=${multiResult.citations.length} sources=${multiResult.sources}` : "null");
 
         if (multiResult) {
           references = multiResult.references;
@@ -1334,21 +1329,16 @@ export default class CitationGraphPlugin extends Plugin {
           const modal = new Modal(this.app);
           modal.onOpen = () => {
             const { contentEl } = modal;
-            contentEl.createEl("h3", { text: "New Zotero Collection" });
+            modal.setTitle("New Zotero collection");
             const input = contentEl.createEl("input", {
               type: "text",
               cls: "citation-graph-collection-name-input",
               value: suggestedName,
             });
-            input.style.width = "100%";
-            input.style.marginBottom = "8px";
 
             const warning = contentEl.createDiv({
               cls: "citation-graph-collection-warning",
             });
-            warning.style.color = "var(--text-error)";
-            warning.style.fontSize = "0.85em";
-            warning.style.marginBottom = "8px";
 
             const updateWarning = () => {
               if (existingNames.has(input.value.trim())) {
@@ -1588,9 +1578,9 @@ export default class CitationGraphPlugin extends Plugin {
         const modal = new Modal(this.app);
         modal.onOpen = () => {
           const { contentEl } = modal;
-          contentEl.createEl("h3", {
-            text: `Delete ${targetPaths.length} paper${targetPaths.length > 1 ? "s" : ""}?`,
-          });
+          modal.setTitle(
+            `Delete ${targetPaths.length} paper${targetPaths.length > 1 ? "s" : ""}?`
+          );
           contentEl.createEl("p", {
             text: "The canvas node and its citation edges will be removed, and the literature note will be moved to trash.",
           });
@@ -1819,7 +1809,7 @@ export default class CitationGraphPlugin extends Plugin {
         const modal = new Modal(this.app);
         modal.onOpen = () => {
           const { contentEl } = modal;
-          contentEl.createEl("h3", { text: "Relayout Canvas" });
+          modal.setTitle("Relayout canvas");
           contentEl.createEl("p", {
             text: "This will reset all node positions. Custom positioning will be lost.",
           });
@@ -2597,15 +2587,13 @@ class DoiInputModal extends Modal {
   onOpen(): void {
     const { contentEl } = this;
     contentEl.empty();
-    contentEl.createEl("h2", { text: "Add Paper" });
+    this.setTitle("Add paper");
 
     const input = contentEl.createEl("input", {
       type: "text",
       placeholder: "DOI, arxiv ID, or URL",
       cls: "citation-graph-doi-input",
     });
-    input.style.width = "100%";
-    input.style.marginBottom = "12px";
 
     const footer = contentEl.createDiv({ cls: "citation-graph-footer" });
     new ButtonComponent(footer)
