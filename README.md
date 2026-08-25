@@ -6,21 +6,21 @@ An Obsidian plugin that turns a Zotero collection into a **citation graph canvas
 
 ## What it does
 
-**Build a canvas.** *Create from Collection* pulls a Zotero collection; *Create from Tag* pulls everything carrying one or more tags (several tags means an intersection, and importer-added tags are hidden unless you ask for them). Papers are resolved through Semantic Scholar, citation edges are drawn between any two papers both present, and each paper gets a literature note with structured frontmatter.
+**Build a canvas.** *Create from collection* pulls a Zotero collection; *Create from tag* pulls everything carrying one or more tags (several tags means an intersection, and importer-added tags are hidden unless you ask for them). Papers are resolved through Semantic Scholar, citation edges are drawn between any two papers both present, and each paper gets a literature note with structured frontmatter.
 
-**Grow it.** *Expand Paper* finds a paper's references and citing works, filtered by direction, keyword and year, and sorted by citation count. Pick what to add, and notes, nodes and edges appear (with the new papers optionally pushed to Zotero). *Add Paper by DOI or arXiv* adds one paper directly; if Semantic Scholar does not know it, the plugin falls back to OpenAlex, arXiv and Crossref so it still lands with whatever metadata exists.
+**Grow it.** *Expand paper* finds a paper's references and citing works, filtered by direction, keyword and year, and sorted by citation count. Pick what to add, and notes, nodes and edges appear (with the new papers optionally pushed to Zotero). *Add paper by DOI or arXiv* adds one paper directly; if Semantic Scholar does not know it, the plugin falls back to OpenAlex, arXiv and Crossref so it still lands with whatever metadata exists.
 
 **Read through it.** Every paper carries a reading status painted as its node colour, so a canvas doubles as a reading list: *to read*, *reading*, *read*, *read with notes written*, and *abandoned*. Set them one at a time, cycle them from a hotkey, or repaint a whole canvas at once.
 
-**Fill it in.** *Download* fetches PDFs from arXiv. *Write Summary* sends a PDF to Anthropic, OpenAI, Google Gemini, or a local Claude CLI and writes a structured summary into the note, with a progress bar and a token budget you can cap.
+**Fill it in.** *Download* fetches PDFs from arXiv. *Write summary* sends a PDF to Anthropic, OpenAI, Google Gemini, or a local Claude CLI and writes a structured summary into the note, with a progress bar and a token budget you can cap.
 
-**Keep it tidy.** *Sync Canvas to Zotero* pushes new papers back. *Send Papers to Canvas* copies or moves papers with their edges between canvases. *Relayout Canvas* re-sorts by year. *Delete Paper* removes the node, its edges and the note together, which Obsidian's own delete does not.
+**Keep it tidy.** *Sync canvas to Zotero* pushes new papers back. *Send papers to canvas* copies or moves papers with their edges between canvases. *Relayout canvas* re-sorts by year. *Delete paper* removes the node, its edges and the note together, which Obsidian's own delete does not.
 
 ## Requirements
 
 - **Zotero**, running, with the local API enabled: Edit, Settings, Advanced, then tick *"Allow other applications on this computer to communicate with Zotero"*.
 - **Better BibTeX** (recommended) for the citekeys used in note filenames and matching.
-- For *Write Summary*: an API key for Anthropic, OpenAI or Google Gemini, or the Claude CLI installed locally.
+- For *Write summary*: an API key for Anthropic, OpenAI or Google Gemini, or the Claude CLI installed locally.
 - For *Sync to Zotero*: a Zotero API key and user ID from [zotero.org/settings/keys](https://www.zotero.org/settings/keys).
 
 ## Installation
@@ -37,20 +37,20 @@ All are in the command palette under `Citation Graph:`.
 
 | Command | What it does |
 |---|---|
-| **Create from Collection** | Builds a canvas from a Zotero collection, into `<collections folder>/<collection name>/` |
-| **Create from Tag** | Builds a canvas from an intersection of Zotero tags, into a folder named after the tags |
-| **Expand Paper** | Adds a paper's references and citing works; **(Force Refresh)** bypasses the local cache |
-| **Add Paper by DOI or arXiv** | Adds one paper from a DOI, an arXiv ID, or a URL containing either |
-| **Write Summary** | Writes an LLM summary into the note under `## Summary` |
+| **Create from collection** | Builds a canvas from a Zotero collection, into `<collections folder>/<collection name>/` |
+| **Create from tag** | Builds a canvas from an intersection of Zotero tags, into a folder named after the tags |
+| **Expand paper** | Adds a paper's references and citing works; **(force refresh)** bypasses the local cache |
+| **Add paper by DOI or arXiv** | Adds one paper from a DOI, an arXiv ID, or a URL containing either |
+| **Write summary** | Writes an LLM summary into the note under `## Summary` |
 | **Download** | Fetches PDFs for papers on the canvas |
-| **Set Paper Status** | Sets the selected papers to *to read*, *reading*, *read*, or *abandoned* |
-| **Cycle Reading Status** | Advances the selection one step through *to read*, *reading*, *read*. Good on a hotkey |
-| **Refresh Reading Status** | Repaints every paper on the canvas from its note |
-| **Relayout Canvas** | Re-sorts nodes chronologically, discarding manual positions |
-| **Sync Canvas to Zotero** | Pushes the canvas's papers back to a Zotero collection |
-| **Send Papers to Canvas** | Copies or moves papers, with their edges, to another canvas |
-| **Delete Paper** | Deletes the node, its edges and the literature note together |
-| **Clear Semantic Scholar Cache** | Drops cached reference data if you suspect it is stale |
+| **Set paper status** | Sets the selected papers to *to read*, *reading*, *read*, or *abandoned* |
+| **Cycle reading status** | Advances the selection one step through *to read*, *reading*, *read*. Good on a hotkey |
+| **Refresh reading status** | Repaints every paper on the canvas from its note |
+| **Relayout canvas** | Re-sorts nodes chronologically, discarding manual positions |
+| **Sync canvas to Zotero** | Pushes the canvas's papers back to a Zotero collection |
+| **Send papers to canvas** | Copies or moves papers, with their edges, to another canvas |
+| **Delete paper** | Deletes the node, its edges and the literature note together |
+| **Clear Semantic Scholar cache** | Drops cached reference data if you suspect it is stale |
 
 Commands that act on papers take the current canvas selection, and fall back to a fuzzy picker when nothing is selected.
 
@@ -58,13 +58,13 @@ Commands that act on papers take the current canvas selection, and fall back to 
 
 **Reading status lives in the note**, in a `status` frontmatter field, so it follows a paper across every canvas it appears on and is queryable from Dataview. Notes predating this feature carry `read: true` and are treated as *read* until their status is next set.
 
-**"Read with notes written" is derived, not stored.** As soon as a note contains anything beyond the generated template, whether your own prose, an added heading, a checklist, or a summary from *Write Summary*, the paper is painted as annotated. It is therefore absent from the status picker, and it is why *Refresh Reading Status* exists: writing notes changes a paper's appearance with no command involved. Abandoned papers are the exception and stay abandoned, since notes on them usually record why you dropped the paper.
+**"Read with notes written" is derived, not stored.** As soon as a note contains anything beyond the generated template, whether your own prose, an added heading, a checklist, or a summary from *Write summary*, the paper is painted as annotated. It is therefore absent from the status picker, and it is why *Refresh reading status* exists: writing notes changes a paper's appearance with no command involved. Abandoned papers are the exception and stay abandoned, since notes on them usually record why you dropped the paper.
 
-**Write Summary finds the PDF** by looking for `Title (Author) (Year).pdf` in the canvas's last download directory and then in the default download path, and offers to download it if it is missing. It warns before summarising anything over ten pages, and asks whether to append or replace when a `## Summary` section already exists.
+**Write summary finds the PDF** by looking for `Title (Author) (Year).pdf` in the canvas's last download directory and then in the default download path, and offers to download it if it is missing. It warns before summarising anything over ten pages, and asks whether to append or replace when a `## Summary` section already exists.
 
 **Download** saves as `Title (FirstAuthor) (Year).pdf`. Papers already in the target directory are marked `downloaded` and left unchecked; papers no configured source can supply are marked `no source` and cannot be selected. Only arXiv ships configured, so papers with no arXiv version cannot be fetched. Adding a source means implementing `DownloadFallback` (`src/api/download-fallback.ts`) and returning it from `src/api/fallback-source.ts`; the picker, progress reporting and error messages pick it up with no other changes.
 
-**Send Papers to Canvas** carries an edge over whenever both its endpoints exist on the target. It does not go looking for new ones: run *Expand Paper* on the target for that.
+**Send papers to canvas** carries an edge over whenever both its endpoints exist on the target. It does not go looking for new ones: run *Expand paper* on the target for that.
 
 ## Settings
 
@@ -116,7 +116,7 @@ cssclasses:
 ---
 ```
 
-The body carries a title heading, an author/year/DOI/arXiv block, a `## Summary` section written by *Write Summary*, and a `## Notes` section for you.
+The body carries a title heading, an author/year/DOI/arXiv block, a `## Summary` section written by *Write summary*, and a `## Notes` section for you.
 
 ## How it works
 
@@ -127,7 +127,7 @@ The **Zotero local API** on `localhost:23119` reads collections and items, needi
 - Papers with neither a DOI nor an arXiv ID cannot be resolved and are skipped.
 - Citation edges are drawn only between papers both present on the canvas.
 - Semantic Scholar's free tier allows roughly 100 requests per 5 minutes, so a large collection takes a few minutes.
-- Only arXiv is configured as a PDF source, so papers without an arXiv version cannot be downloaded, and *Write Summary* cannot reach their PDFs.
+- Only arXiv is configured as a PDF source, so papers without an arXiv version cannot be downloaded, and *Write summary* cannot reach their PDFs.
 
 ## Development
 

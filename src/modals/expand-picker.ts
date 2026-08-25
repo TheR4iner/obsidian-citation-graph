@@ -83,7 +83,7 @@ export class ExpandPickerModal extends Modal {
     contentEl.empty();
     contentEl.addClass("citation-graph-expand-modal");
 
-    contentEl.createEl("h2", { text: "Expand Paper — Select papers to add" });
+    this.setTitle("Expand paper: select papers to add");
 
     // Filter buttons
     const filterRow = contentEl.createDiv("citation-graph-filter-row");

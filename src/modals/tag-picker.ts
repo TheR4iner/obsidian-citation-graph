@@ -97,7 +97,7 @@ export class TagPickerModal extends Modal {
     contentEl.empty();
     contentEl.addClass("citation-graph-tag-modal");
 
-    contentEl.createEl("h2", { text: "Create from Tag" });
+    this.setTitle("Create from tag");
     contentEl.createEl("p", {
       text: "Select one or more tags. Multiple tags = intersection (papers must have all selected tags).",
       cls: "citation-graph-tag-help",

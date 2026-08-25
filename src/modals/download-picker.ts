@@ -164,7 +164,7 @@ export class DownloadPickerModal extends Modal {
     contentEl.empty();
     contentEl.addClass("citation-graph-download-modal");
 
-    contentEl.createEl("h2", { text: "Download Papers" });
+    this.setTitle("Download papers");
 
     // Download path row. The native folder picker used to live here but
     // electron.remote was removed in Electron 14, so the button was silently
