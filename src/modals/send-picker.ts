@@ -59,7 +59,7 @@ export class SendPickerModal extends Modal {
     contentEl.empty();
     contentEl.addClass("citation-graph-send-modal");
 
-    contentEl.createEl("h2", { text: "Send Papers to Canvas" });
+    this.setTitle("Send papers to canvas");
 
     // Select all / deselect all
     const actionRow = contentEl.createDiv("citation-graph-download-actions");

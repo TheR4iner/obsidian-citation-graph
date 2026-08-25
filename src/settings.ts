@@ -101,7 +101,6 @@ export class CitationGraphSettingTab extends PluginSettingTab {
     const { containerEl } = this;
     containerEl.empty();
 
-    containerEl.createEl("h2", { text: "Citation Graph Settings" });
 
     // --- Folders ---
     new Setting(containerEl)
@@ -119,7 +118,7 @@ export class CitationGraphSettingTab extends PluginSettingTab {
       });
 
     // --- Zotero ---
-    containerEl.createEl("h3", { text: "Zotero" });
+    new Setting(containerEl).setName("Zotero").setHeading();
 
     new Setting(containerEl)
       .setName("Zotero API key")
@@ -155,7 +154,7 @@ export class CitationGraphSettingTab extends PluginSettingTab {
       );
 
     // --- Semantic Scholar ---
-    containerEl.createEl("h3", { text: "Semantic Scholar" });
+    new Setting(containerEl).setName("Semantic Scholar").setHeading();
 
     new Setting(containerEl)
       .setName("API key (optional)")
@@ -187,7 +186,7 @@ export class CitationGraphSettingTab extends PluginSettingTab {
       );
 
     // --- Supplementary Citation Sources ---
-    containerEl.createEl("h3", { text: "Supplementary Citation Sources" });
+    new Setting(containerEl).setName("Supplementary citation sources").setHeading();
 
     containerEl.createEl("p", {
       text: "Query additional databases when expanding papers to find references that Semantic Scholar may miss.",
@@ -232,7 +231,7 @@ export class CitationGraphSettingTab extends PluginSettingTab {
       );
 
     // --- Canvas ---
-    containerEl.createEl("h3", { text: "Canvas" });
+    new Setting(containerEl).setName("Canvas").setHeading();
 
     new Setting(containerEl)
       .setName("Node width")
@@ -267,7 +266,7 @@ export class CitationGraphSettingTab extends PluginSettingTab {
       );
 
     // --- Reading status colors ---
-    containerEl.createEl("h3", { text: "Reading status colors" });
+    new Setting(containerEl).setName("Reading status colors").setHeading();
     containerEl.createEl("p", {
       text:
         "Canvas node color for each reading status. Colors are reapplied whenever the " +
@@ -278,8 +277,9 @@ export class CitationGraphSettingTab extends PluginSettingTab {
     // Status is read back off the node's colour, so two statuses sharing one
     // colour are genuinely indistinguishable on the canvas. Say so rather
     // than letting it look like a bug.
-    const clashWarning = containerEl.createEl("p", { cls: "setting-item-description" });
-    clashWarning.style.color = "var(--text-error)";
+    const clashWarning = containerEl.createEl("p", {
+      cls: "setting-item-description citation-graph-settings-warning",
+    });
     const refreshClashWarning = () => {
       const used = new Map<string, string[]>();
       for (const { key, status } of STATUS_COLOR_SETTINGS) {
@@ -308,7 +308,7 @@ export class CitationGraphSettingTab extends PluginSettingTab {
 
       let hexEl: HTMLElement | null = null;
       const showHexField = (visible: boolean) => {
-        if (hexEl) hexEl.style.display = visible ? "" : "none";
+        if (hexEl) hexEl.toggleClass("citation-graph-hidden", !visible);
       };
 
       setting.addDropdown((dropdown) => {
@@ -342,12 +342,12 @@ export class CitationGraphSettingTab extends PluginSettingTab {
             text.inputEl.toggleClass("is-invalid", value.trim() !== "" && !valid);
             if (!valid) return;
             hex = parsed;
-            text.inputEl.style.borderColor = parsed;
+            text.inputEl.setCssProps({ "--cg-swatch": parsed });
             this.plugin.settings[key] = parsed as StatusColor;
             await this.plugin.saveSettings();
             refreshClashWarning();
           });
-        if (isCustomColor(stored)) text.inputEl.style.borderColor = stored;
+        if (isCustomColor(stored)) text.inputEl.setCssProps({ "--cg-swatch": stored });
       });
 
       showHexField(isCustomColor(stored));
@@ -356,7 +356,7 @@ export class CitationGraphSettingTab extends PluginSettingTab {
     refreshClashWarning();
 
     // --- LLM / Summarization ---
-    containerEl.createEl("h3", { text: "LLM / Summarization" });
+    new Setting(containerEl).setName("Summaries").setHeading();
 
     const providerLabels: Record<string, string> = {
       "claude-cli": "Claude CLI (local)",
@@ -487,11 +487,11 @@ export class CitationGraphSettingTab extends PluginSettingTab {
             await this.plugin.saveSettings();
           });
         text.inputEl.rows = 8;
-        text.inputEl.style.width = "100%";
+        text.inputEl.addClass("citation-graph-prompt-input");
       });
 
     // --- Download ---
-    containerEl.createEl("h3", { text: "Download" });
+    new Setting(containerEl).setName("Download").setHeading();
 
     new Setting(containerEl)
       .setName("Default download path")
@@ -507,7 +507,7 @@ export class CitationGraphSettingTab extends PluginSettingTab {
       );
 
     // --- Banned Papers ---
-    containerEl.createEl("h3", { text: "Banned Papers" });
+    new Setting(containerEl).setName("Banned papers").setHeading();
 
     new Setting(containerEl)
       .setName("Manage banned papers")
@@ -561,7 +561,7 @@ class BannedPapersManagerModal extends Modal {
     contentEl.empty();
     contentEl.addClass("citation-graph-banned-modal");
 
-    contentEl.createEl("h2", { text: "Banned Papers Manager" });
+    this.setTitle("Banned papers");
 
     // Canvas selector
     const selectorRow = new Setting(contentEl)

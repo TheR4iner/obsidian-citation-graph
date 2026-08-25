@@ -17,7 +17,7 @@ export class PostAddSummaryModal extends Modal {
     contentEl.empty();
     contentEl.addClass("citation-graph-batch-modal");
 
-    contentEl.createEl("h3", { text: "Generate Summary?" });
+    this.setTitle("Generate summary?");
     contentEl.createEl("p", {
       text: "Would you also like to generate an LLM summary for this paper?",
     });
@@ -67,7 +67,7 @@ export class BatchMissingPdfModal extends Modal {
     contentEl.empty();
     contentEl.addClass("citation-graph-batch-modal");
 
-    contentEl.createEl("h3", { text: "PDFs Not Found" });
+    this.setTitle("PDFs not found");
     contentEl.createEl("p", {
       text: `${this.missingPapers.length} paper${this.missingPapers.length > 1 ? "s do" : " does"} not have a downloaded PDF:`,
     });
@@ -125,7 +125,7 @@ export class BatchLongPaperWarningModal extends Modal {
     contentEl.empty();
     contentEl.addClass("citation-graph-batch-modal");
 
-    contentEl.createEl("h3", { text: "Long Paper Warning" });
+    this.setTitle("Long paper warning");
     contentEl.createEl("p", {
       text: "The following papers are long and may take extra time and tokens to summarize:",
     });
@@ -181,7 +181,7 @@ export class BatchSummaryModeModal extends Modal {
     contentEl.empty();
     contentEl.addClass("citation-graph-batch-modal");
 
-    contentEl.createEl("h3", { text: "Existing Summaries Found" });
+    this.setTitle("Existing summaries found");
     contentEl.createEl("p", {
       text: `${this.withSummaryCount} of ${this.totalCount} selected paper${this.totalCount > 1 ? "s" : ""} already have a Summary section. How should existing summaries be handled?`,
     });

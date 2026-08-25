@@ -28,7 +28,7 @@ export class SummaryProgressModal extends Modal {
 		contentEl.empty();
 		contentEl.addClass("citation-graph-progress-modal");
 
-		contentEl.createEl("h3", { text: "Generating Summaries" });
+		this.setTitle("Generating summaries");
 
 		// Progress bar
 		const barOuter = contentEl.createDiv({ cls: "cg-progress-bar" });
@@ -58,7 +58,7 @@ export class SummaryProgressModal extends Modal {
 	/** Called before processing each paper to update the progress bar and status. */
 	update(current: number, title: string, tokensSoFar: number): void {
 		const pct = Math.round((current / this.total) * 100);
-		this.progressFillEl.style.width = `${pct}%`;
+		this.progressFillEl.setCssProps({ "--cg-progress": `${pct}%` });
 		this.statusEl.setText(`${current}/${this.total}: ${title}`);
 		this.updateTokensDisplay(tokensSoFar);
 	}
@@ -80,7 +80,7 @@ export class SummaryProgressModal extends Modal {
 
 	/** Show the final summary and switch Cancel to Close. */
 	showComplete(completed: number, failed: number, tokens: number): void {
-		this.progressFillEl.style.width = "100%";
+		this.progressFillEl.setCssProps({ "--cg-progress": "100%" });
 
 		let msg = `Done: ${completed} succeeded`;
 		if (failed > 0) msg += `, ${failed} failed`;

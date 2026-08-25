@@ -528,7 +528,8 @@
   background: var(--interactive-accent);
   border-radius: 4px;
   transition: width 0.3s ease;
-  width: 0%;
+  /* Set by the modal through setCssProps as papers complete. */
+  width: var(--cg-progress, 0%);
 }
 
 .cg-progress-status {
@@ -582,6 +583,46 @@
   border-width: 2px;
 }
 
+.citation-graph-hex-input {
+  border-color: var(--cg-swatch, var(--background-modifier-border));
+}
+
 .citation-graph-hex-input.is-invalid {
   border-color: var(--text-error);
+}
+
+/* --- Settings and modal chrome ---------------------------------------- */
+
+/* Applied to any element the plugin needs to hide from script, in place of
+   assigning display:none inline. */
+.citation-graph-hidden {
+  display: none;
+}
+
+/* Warning under the reading-status colours, shown when two share a colour. */
+.citation-graph-settings-warning {
+  color: var(--text-error);
+}
+
+/* The Summary prompt textarea, which is wider than Obsidian's default. */
+.citation-graph-prompt-input {
+  width: 100%;
+}
+
+/* Name field and duplicate-name warning in the "create Zotero collection" modal. */
+.citation-graph-collection-name-input {
+  width: 100%;
+  margin-bottom: 8px;
+}
+
+.citation-graph-collection-warning {
+  color: var(--text-error);
+  font-size: 0.85em;
+  margin-bottom: 8px;
+}
+
+/* Identifier field in the "add paper by DOI or arXiv" modal. */
+.citation-graph-doi-input {
+  width: 100%;
+  margin-bottom: 12px;
 }
