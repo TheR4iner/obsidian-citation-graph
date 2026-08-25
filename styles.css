@@ -1,0 +1,587 @@
+/* Citation Graph — Hide properties in canvas node previews */
+.canvas-node-content .citation-graph-note .metadata-container {
+  display: none;
+}
+
+/* Reading status is carried by the node's border, plus a label spelling the
+ * status out beneath the note.
+ *
+ * By default Obsidian renders a coloured canvas node as a 1px border at 40%
+ * of the colour plus a 7% wash across the interior. Both are far too weak to
+ * read: two different greens are indistinguishable at that strength, and the
+ * wash tints the note's own text without conveying anything.
+ *
+ * The two live on different elements, confirmed against a real canvas DOM:
+ * the border on .canvas-node-container, the wash on the .canvas-node-content
+ * nested inside it. The wash must therefore be cleared separately, or it
+ * paints straight over the container beneath.
+ *
+ * The colour comes from --canvas-color, which Obsidian sets per node from the
+ * .canvas file's `color` field as a complete colour value (e.g. "#d9a83a").
+ * It is read through a registered custom property because an uncoloured
+ * ("to read") node leaves --canvas-color empty: a plain var() substitution
+ * would then be invalid at computed-value time, and an invalid border-color
+ * falls back to currentColor, painting those nodes in the note's text colour.
+ * A registered property falls back to its initial-value instead.
+ *
+ * It inherits so that ::after, which draws the label, picks up the same
+ * colour; a non-inheriting property would hand the pseudo-element the
+ * initial value and every label would come out grey. */
+@property --cg-status-color {
+  syntax: "<color>";
+  inherits: true;
+  /* Obsidian's default uncoloured node frame. Must be a literal: an
+     initial-value has to be computationally independent, so no var(). */
+  initial-value: #424242;
+}
+
+/* !important throughout: this deliberately overrides Obsidian's own node
+   styling, which sets the border and the wash on these same elements.
+
+   Applied to every canvas node, not just papers. The wash is a rendering
+   choice, not a status: a canvas holds the user's own notes beside papers,
+   and leaving those washed while their neighbours are cleanly framed looks
+   broken. What is reserved for papers is the *status* -- the label below,
+   and the plugin owning which colour the border takes. */
+.canvas-node .canvas-node-container {
+  --cg-status-color: var(--canvas-color);
+  position: relative;
+  background-color: var(--background-primary) !important;
+  border-width: 3px !important;
+  border-color: var(--cg-status-color) !important;
+}
+
+.canvas-node .canvas-node-content {
+  background-color: transparent !important;
+}
+
+/* Only papers reserve room for a status label. */
+.canvas-node:has(.citation-graph-note) .canvas-node-content {
+  padding-bottom: 4.2em !important;
+}
+
+/* The status, spelled out along the bottom edge of the node.
+ *
+ * Inset from the frame rather than spanning it, so the rule above the label
+ * reads as a divider inside the note rather than a second border. The gutters
+ * it leaves expose the container's own background, which is the same colour,
+ * so content still cannot show through beneath it.
+ *
+ * Sized from --font-text-size rather than in em: this pseudo-element hangs
+ * off .canvas-node-container, whose font-size comes from the app chrome, not
+ * from the note. An em here would be relative to the wrong thing and render
+ * far smaller than the note's own text. */
+.canvas-node:has(.citation-graph-note) .canvas-node-container::after {
+  content: var(--cg-status-label, "");
+  position: absolute;
+  left: 1.2em;
+  right: 1.2em;
+  bottom: 1.1em;
+  padding-top: 0.8em;
+  /* The divider is painted as a background gradient rather than a border, so
+     its length is set independently of the label's box. A border-top would be
+     forced to span the whole box, and shortening it by insetting the box would
+     drag the label text inward with it, out of line with the note's own text. */
+  background-color: var(--background-primary);
+  background-image: linear-gradient(
+    var(--background-modifier-border),
+    var(--background-modifier-border)
+  );
+  background-repeat: no-repeat;
+  background-position: center top;
+  background-size: 100% 3px;
+  color: var(--cg-status-color);
+  font-size: calc(var(--font-text-size, 16px) * 1);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  pointer-events: none;
+}
+
+/* Every paper starts as "to read". Papers whose colour matches a configured
+   status are relabelled by the runtime stylesheet the plugin injects (see
+   applyStatusStyles in main.ts), which also dashes and dims abandoned ones.
+   Those rules are generated because the colours are user-configurable. */
+.canvas-node:has(.citation-graph-note) .canvas-node-container {
+  --cg-status-label: "To read";
+  transition: opacity 120ms ease-in-out;
+}
+
+/* Citation Graph — Expand Modal */
+.citation-graph-expand-modal {
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.citation-graph-filter-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.citation-graph-filter-btn {
+  padding: 4px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.85em;
+}
+
+.citation-graph-filter-btn.is-active {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
+.citation-graph-search-row {
+  margin-bottom: 8px;
+}
+
+.citation-graph-search-input {
+  width: 100%;
+  padding: 6px 10px;
+}
+
+.citation-graph-year-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.citation-graph-year-label {
+  font-size: 0.85em;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.citation-graph-year-input {
+  width: 80px;
+  padding: 4px 8px;
+}
+
+.citation-graph-count {
+  font-size: 0.85em;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+
+.citation-graph-paper-list {
+  overflow-y: auto;
+  flex: 1;
+  max-height: 50vh;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  padding: 4px;
+}
+
+.citation-graph-paper-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.citation-graph-paper-row:last-child {
+  border-bottom: none;
+}
+
+.citation-graph-paper-row.is-on-canvas {
+  opacity: 0.5;
+}
+
+.citation-graph-paper-row input[type="checkbox"] {
+  margin-top: 4px;
+  flex-shrink: 0;
+}
+
+.citation-graph-paper-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.citation-graph-paper-info strong {
+  display: block;
+  margin-bottom: 2px;
+}
+
+.citation-graph-paper-meta {
+  font-size: 0.8em;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+
+.citation-graph-paper-abstract {
+  font-size: 0.78em;
+  color: var(--text-faint);
+  line-height: 1.3;
+}
+
+.citation-graph-row-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.citation-graph-badge {
+  font-size: 0.7em;
+  padding: 2px 6px;
+  border-radius: 3px;
+  background: var(--background-modifier-border);
+  flex-shrink: 0;
+}
+
+.citation-graph-ban-btn {
+  font-size: 0.75em;
+  padding: 2px 8px;
+  border-radius: 3px;
+  cursor: pointer;
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid var(--background-modifier-border);
+}
+
+.citation-graph-ban-btn:hover {
+  color: var(--text-error);
+  border-color: var(--text-error);
+  background: var(--background-modifier-error);
+}
+
+.citation-graph-footer {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+/* Citation Graph — Tag Picker Modal */
+.citation-graph-tag-modal {
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.citation-graph-tag-help {
+  font-size: 0.85em;
+  color: var(--text-muted);
+  margin: 0 0 8px 0;
+}
+
+.citation-graph-tag-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.citation-graph-tag-toggle-label {
+  font-size: 0.9em;
+}
+
+.citation-graph-tag-search-row {
+  margin-bottom: 8px;
+}
+
+.citation-graph-tag-search-input {
+  width: 100%;
+  padding: 6px 10px;
+}
+
+.citation-graph-tag-count {
+  font-size: 0.85em;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+
+.citation-graph-tag-list {
+  overflow-y: auto;
+  flex: 1;
+  max-height: 50vh;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  padding: 4px;
+}
+
+.citation-graph-tag-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.citation-graph-tag-row:last-child {
+  border-bottom: none;
+}
+
+.citation-graph-tag-row:hover {
+  background: var(--background-modifier-hover);
+}
+
+.citation-graph-tag-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.citation-graph-tag-auto-badge {
+  font-size: 0.7em;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: var(--background-modifier-border);
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.citation-graph-tag-itemcount {
+  font-size: 0.75em;
+  color: var(--text-faint);
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+  min-width: 2.5em;
+  text-align: right;
+}
+
+.citation-graph-tag-empty {
+  padding: 20px;
+  text-align: center;
+  color: var(--text-muted);
+}
+
+.citation-graph-tag-footer {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+/* Download Modal */
+.citation-graph-download-modal {
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.citation-graph-download-path-row {
+  margin-bottom: 12px;
+}
+
+.citation-graph-download-label {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.citation-graph-download-path-input-row {
+  display: flex;
+  gap: 8px;
+}
+
+.citation-graph-download-path-input {
+  flex: 1;
+  padding: 6px 10px;
+}
+
+.citation-graph-download-path-hint {
+  font-size: 0.85em;
+  color: var(--text-muted);
+  margin-top: -8px;
+  margin-bottom: 12px;
+}
+
+.citation-graph-download-actions {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.citation-graph-paper-row.is-downloaded {
+  opacity: 0.5;
+}
+
+.citation-graph-paper-row.is-no-source {
+  opacity: 0.4;
+}
+
+.citation-graph-doi {
+  font-family: var(--font-monospace);
+  font-size: 0.9em;
+}
+
+.citation-graph-badge-downloaded {
+  color: var(--text-success);
+}
+
+.citation-graph-badge-nosource {
+  color: var(--text-error);
+}
+
+/* Send Papers Modal */
+.citation-graph-send-modal {
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Banned Papers Manager Modal */
+.citation-graph-banned-modal {
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.citation-graph-banned-search {
+  margin-bottom: 8px;
+}
+
+.citation-graph-banned-search-input {
+  width: 100%;
+  padding: 6px 10px;
+}
+
+.citation-graph-banned-list {
+  overflow-y: auto;
+  flex: 1;
+  max-height: 50vh;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  padding: 4px;
+}
+
+.citation-graph-banned-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.citation-graph-banned-row:last-child {
+  border-bottom: none;
+}
+
+.citation-graph-banned-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.citation-graph-banned-id {
+  font-size: 0.7em;
+  color: var(--text-faint);
+  flex-shrink: 0;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.citation-graph-banned-remove {
+  font-size: 0.8em;
+  padding: 2px 8px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.citation-graph-banned-empty {
+  padding: 20px;
+  text-align: center;
+  color: var(--text-muted);
+}
+
+.citation-graph-banned-footer {
+  font-size: 0.85em;
+  color: var(--text-muted);
+  margin-top: 8px;
+  text-align: right;
+}
+
+/* Summary Progress Modal */
+.citation-graph-progress-modal {
+  max-width: 500px;
+}
+
+.cg-progress-bar {
+  height: 8px;
+  background: var(--background-modifier-border);
+  border-radius: 4px;
+  margin: 12px 0;
+  overflow: hidden;
+}
+
+.cg-progress-fill {
+  height: 100%;
+  background: var(--interactive-accent);
+  border-radius: 4px;
+  transition: width 0.3s ease;
+  width: 0%;
+}
+
+.cg-progress-status {
+  margin: 8px 0 4px;
+  font-weight: 500;
+}
+
+.cg-progress-tokens {
+  font-size: 0.85em;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+
+.cg-progress-log {
+  max-height: 200px;
+  overflow-y: auto;
+  font-size: 0.85em;
+  margin: 8px 0;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  padding: 4px;
+}
+
+.cg-progress-item {
+  padding: 3px 6px;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.cg-progress-item:last-child {
+  border-bottom: none;
+}
+
+.cg-status-ok {
+  color: var(--text-success);
+  font-weight: bold;
+  margin-right: 4px;
+}
+
+.cg-status-fail {
+  color: var(--text-error);
+  font-weight: bold;
+  margin-right: 4px;
+}
+
+/* Custom hex field beside each reading-status colour dropdown. Monospaced so
+   hex digits line up, and border-tinted to preview the chosen colour. */
+.citation-graph-hex-input {
+  font-family: var(--font-monospace);
+  width: 9ch;
+  text-align: center;
+  border-width: 2px;
+}
+
+.citation-graph-hex-input.is-invalid {
+  border-color: var(--text-error);
+}

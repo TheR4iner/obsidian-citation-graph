@@ -1,0 +1,112 @@
+#!/bin/sh
+#
+# Refuse to push anything matching the private-content patterns to a remote
+# that has not been explicitly marked as trusted.
+#
+# This repository may be maintained alongside a downstream variant that carries
+# files which must never reach this remote. The check fails closed: an unknown
+# remote is treated as untrusted, so adding a remote or repointing a URL cannot
+# silently disable the guard.
+#
+# Trust a remote by URL (not by name -- a name can be repointed):
+#     git config --add citationgraph.trustedremoteurl 'github.com:me/my-private-fork'
+#
+# Patterns live in .githooks/forbidden-paths.txt and .githooks/forbidden-text.txt,
+# one extended-regex per line. Both are gitignored, so a clone without them has
+# nothing to enforce and this hook is a no-op.
+#
+# stdin: <local ref> <local sha> <remote ref> <remote sha>, one line per ref.
+
+set -u
+
+remote_name="${1:-}"
+remote_url="${2:-}"
+
+hooks_dir="$(git rev-parse --show-toplevel)/.githooks"
+paths_file="$hooks_dir/forbidden-paths.txt"
+text_file="$hooks_dir/forbidden-text.txt"
+zero='0000000000000000000000000000000000000000'
+
+if [ ! -s "$paths_file" ] && [ ! -s "$text_file" ]; then
+  # A clone with no pattern files has nothing to enforce, which is the normal
+  # case. Where the guard is meant to be armed, say so rather than passing
+  # silently: set `git config citationgraph.guardrequired true` there.
+  if [ "$(git config --bool citationgraph.guardrequired 2>/dev/null)" = "true" ]; then
+    echo "" >&2
+    echo "GUARD MISCONFIGURED: citationgraph.guardrequired is set, but" >&2
+    echo "  .githooks/forbidden-paths.txt and .githooks/forbidden-text.txt are" >&2
+    echo "  both missing or empty. Restore them, or unset the flag with" >&2
+    echo "      git config --unset citationgraph.guardrequired" >&2
+    echo "" >&2
+    exit 1
+  fi
+  exit 0
+fi
+
+# Match trust on the URL so that repointing a remote name does not inherit the
+# trust granted to the URL it used to have.
+for trusted in $(git config --get-all citationgraph.trustedremoteurl 2>/dev/null); do
+  case "$remote_url" in
+    *"$trusted"*) exit 0 ;;
+  esac
+done
+
+fail() {
+  reason="$1"
+  shift
+  echo "" >&2
+  echo "PUSH BLOCKED: private content would reach an untrusted remote." >&2
+  echo "  remote: $remote_name <$remote_url>" >&2
+  echo "  $reason" >&2
+  for item in "$@"; do
+    echo "      $item" >&2
+  done
+  echo "" >&2
+  echo "  If this remote is the private one, trust it once with:" >&2
+  echo "      git config --add citationgraph.trustedremoteurl '<substring of its URL>'" >&2
+  echo "  Otherwise, push a branch built on the public history instead." >&2
+  echo "" >&2
+  exit 1
+}
+
+while read -r _local_ref local_sha _remote_ref remote_sha; do
+  # Branch deletions carry a null local sha and have no tree to inspect.
+  if [ "$local_sha" = "$zero" ]; then
+    continue
+  fi
+
+  if [ -s "$paths_file" ]; then
+    hits=$(git ls-tree -r --name-only "$local_sha" | grep -i -E -f "$paths_file")
+    if [ -n "$hits" ]; then
+      # shellcheck disable=SC2086
+      fail "these paths exist in the commit being pushed:" $hits
+    fi
+  fi
+
+  if [ -s "$text_file" ]; then
+    hits=$(git grep -I -i -l -E -f "$text_file" "$local_sha" -- . 2>/dev/null | sed "s/^$local_sha://")
+    if [ -n "$hits" ]; then
+      # shellcheck disable=SC2086
+      fail "these tracked files contain private content:" $hits
+    fi
+
+    # Commit messages leak just as effectively as code does. Only inspect the
+    # commits this remote does not already have.
+    if [ "$remote_sha" = "$zero" ]; then
+      set -- "$local_sha" --not --remotes="$remote_name"
+    else
+      set -- "$remote_sha..$local_sha"
+    fi
+    hits=$(git rev-list "$@" 2>/dev/null | while read -r sha; do
+             if git log -1 --format='%s%n%b' "$sha" | grep -i -q -E -f "$text_file"; then
+               echo "$sha"
+             fi
+           done)
+    if [ -n "$hits" ]; then
+      # shellcheck disable=SC2086
+      fail "these commit messages mention private content:" $hits
+    fi
+  fi
+done
+
+exit 0

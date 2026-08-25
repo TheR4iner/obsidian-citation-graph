@@ -1,0 +1,17 @@
+node_modules/
+main.js
+*.js.map
+data.json
+citation-graph.log
+s2-cache.json
+.env*
+__pycache__/
+
+# Per-machine Claude Code settings (paths, personal permission grants). Ignored
+# globally on the maintainer's machine, but not on anyone else's.
+.claude/settings.local.json
+
+# Working notes kept out of this repository. The rest of project-kb/ is tracked
+# on purpose, so contributors (and their Claude sessions) start with the same
+# context the maintainers have.
+project-kb/private/

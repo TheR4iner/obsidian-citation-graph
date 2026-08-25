@@ -1,0 +1,88 @@
+#!/bin/sh
+#
+# Early warning for the mistake pre-push exists to catch: staging private
+# content on a branch that tracks a remote which must never receive it.
+#
+# pre-push is the real gate (it inspects whole trees and cannot be sidestepped
+# by an upstream that is set later). This hook only makes the failure happen at
+# the moment the file is staged, where it is cheap to undo.
+#
+# Silent unless the branch tracks an untrusted remote AND something staged
+# matches, so a branch with no upstream, or one tracking the private remote,
+# commits normally.
+
+set -u
+
+hooks_dir="$(git rev-parse --show-toplevel)/.githooks"
+paths_file="$hooks_dir/forbidden-paths.txt"
+text_file="$hooks_dir/forbidden-text.txt"
+
+if [ ! -s "$paths_file" ] && [ ! -s "$text_file" ]; then
+  # See pre-push: silent where there is nothing to enforce, loud where the
+  # guard is declared required but its patterns have gone missing.
+  if [ "$(git config --bool citationgraph.guardrequired 2>/dev/null)" = "true" ]; then
+    echo "" >&2
+    echo "GUARD MISCONFIGURED: citationgraph.guardrequired is set, but" >&2
+    echo "  .githooks/forbidden-paths.txt and .githooks/forbidden-text.txt are" >&2
+    echo "  both missing or empty. Restore them, or unset the flag with" >&2
+    echo "      git config --unset citationgraph.guardrequired" >&2
+    echo "" >&2
+    exit 1
+  fi
+  exit 0
+fi
+
+upstream=$(git rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null)
+if [ -z "$upstream" ]; then
+  exit 0
+fi
+
+upstream_remote=${upstream%%/*}
+upstream_url=$(git remote get-url "$upstream_remote" 2>/dev/null)
+if [ -z "$upstream_url" ]; then
+  exit 0
+fi
+
+for trusted in $(git config --get-all citationgraph.trustedremoteurl 2>/dev/null); do
+  case "$upstream_url" in
+    *"$trusted"*) exit 0 ;;
+  esac
+done
+
+fail() {
+  reason="$1"
+  shift
+  echo "" >&2
+  echo "COMMIT BLOCKED: private content staged on a branch tracking $upstream." >&2
+  echo "  $reason" >&2
+  for item in "$@"; do
+    echo "      $item" >&2
+  done
+  echo "" >&2
+  echo "  Unstage it (git restore --staged <path>) and commit it on a branch" >&2
+  echo "  that tracks the private remote instead." >&2
+  echo "" >&2
+  exit 1
+}
+
+staged=$(git diff --cached --name-only --diff-filter=ACMR)
+if [ -z "$staged" ]; then
+  exit 0
+fi
+
+if [ -s "$paths_file" ]; then
+  hits=$(printf '%s\n' "$staged" | grep -i -E -f "$paths_file")
+  if [ -n "$hits" ]; then
+    # shellcheck disable=SC2086
+    fail "these staged paths are private-only:" $hits
+  fi
+fi
+
+if [ -s "$text_file" ]; then
+  hits=$(git diff --cached --diff-filter=ACMR -U0 | grep '^+' | grep -i -E -f "$text_file")
+  if [ -n "$hits" ]; then
+    fail "the staged diff adds private content, for example:" "$(printf '%s\n' "$hits" | head -3)"
+  fi
+fi
+
+exit 0
