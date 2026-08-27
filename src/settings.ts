@@ -105,14 +105,16 @@ export class CitationGraphSettingTab extends PluginSettingTab {
     // --- Folders ---
     new Setting(containerEl)
       .setName("Collections folder")
-      .setDesc("Root folder for collections. Each Zotero collection gets its own subdirectory containing both the canvas and literature notes.")
+      .setDesc("Root folder for collections. Each Zotero collection gets its own subdirectory containing both the canvas and literature notes. Leave empty to use the vault root.")
       .addText((text) => {
         new FolderSuggest(this.app, text.inputEl);
         text
-          .setPlaceholder("collections")
+          .setPlaceholder("collections (empty = vault root)")
           .setValue(this.plugin.settings.collectionsFolder)
           .onChange(async (value) => {
-            this.plugin.settings.collectionsFolder = value.trim() || "collections";
+            // An empty value is meaningful: it means the vault root. Only the
+            // separator characters are stripped, so "/" and "" agree.
+            this.plugin.settings.collectionsFolder = value.trim().replace(/^\/+|\/+$/g, "");
             await this.plugin.saveSettings();
           });
       });
@@ -484,6 +486,82 @@ export class CitationGraphSettingTab extends PluginSettingTab {
           .setValue(this.plugin.settings.summaryPrompt)
           .onChange(async (value) => {
             this.plugin.settings.summaryPrompt = value;
+            await this.plugin.saveSettings();
+          });
+        text.inputEl.rows = 8;
+        text.inputEl.addClass("citation-graph-prompt-input");
+      });
+
+    // --- Recommendations ---
+    new Setting(containerEl).setName("Recommendations").setHeading();
+
+    new Setting(containerEl)
+      .setName("Papers to suggest")
+      .setDesc(
+        "How many papers the Recommend papers command asks for per run (1 to 50). " +
+        "Each suggestion costs one Semantic Scholar request to verify, so a large number means a long wait."
+      )
+      .addText((text) =>
+        text
+          .setPlaceholder("10")
+          .setValue(String(this.plugin.settings.recommendCount))
+          .onChange(async (value) => {
+            const n = parseInt(value, 10);
+            if (!isNaN(n) && n > 0 && n <= 50) {
+              this.plugin.settings.recommendCount = n;
+              await this.plugin.saveSettings();
+            }
+          })
+      );
+
+    new Setting(containerEl)
+      .setName("Search the web")
+      .setDesc(
+        "Let the model search the web while recommending, instead of relying on its training data alone. " +
+        "Supported by the Anthropic API, Google Gemini and the Claude CLI; the OpenAI endpoint this plugin uses has no search tool. " +
+        "Searching costs extra input tokens."
+      )
+      .addToggle((toggle) =>
+        toggle
+          .setValue(this.plugin.settings.recommendWebSearch)
+          .onChange(async (value) => {
+            this.plugin.settings.recommendWebSearch = value;
+            await this.plugin.saveSettings();
+          })
+      );
+
+    new Setting(containerEl)
+      .setName("Max output tokens")
+      .setDesc(
+        "Maximum tokens per recommendation response. A list of ten papers with reasons needs more room than a summary, " +
+        "and a truncated reply cannot be read back."
+      )
+      .addText((text) =>
+        text
+          .setPlaceholder("4096")
+          .setValue(String(this.plugin.settings.recommendMaxOutputTokens))
+          .onChange(async (value) => {
+            const n = parseInt(value, 10);
+            if (!isNaN(n) && n > 0) {
+              this.plugin.settings.recommendMaxOutputTokens = n;
+              await this.plugin.saveSettings();
+            }
+          })
+      );
+
+    new Setting(containerEl)
+      .setName("Recommendation prompt")
+      .setDesc(
+        "Standing instructions for the Recommend papers command. Leave blank to use the built-in default, " +
+        "and note that the command's own prompt box overrides this for a single run. " +
+        "The canvas paper list and the required JSON reply format are always appended, so a custom prompt cannot break the answer."
+      )
+      .addTextArea((text) => {
+        text
+          .setPlaceholder("Leave blank to use the built-in default prompt.")
+          .setValue(this.plugin.settings.recommendPrompt)
+          .onChange(async (value) => {
+            this.plugin.settings.recommendPrompt = value;
             await this.plugin.saveSettings();
           });
         text.inputEl.rows = 8;

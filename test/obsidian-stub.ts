@@ -18,9 +18,16 @@ export class TFile {
 	extension = "md";
 }
 
-/** Obsidian collapses duplicate separators and strips a leading slash; the
- *  tested paths never exercise that, so identity is enough. */
-export const normalizePath = (p: string): string => p;
+/**
+ * Mirror of Obsidian's normalizePath: duplicate separators collapse, leading
+ * and trailing slashes are stripped, and the empty path becomes the vault
+ * root. An empty collections folder relies on exactly that, so identity here
+ * would let a root-relative path bug pass the tests.
+ */
+export const normalizePath = (p: string): string => {
+	const cleaned = p.replace(/[\\/]+/g, "/").replace(/^\/+|\/+$/g, "");
+	return cleaned === "" ? "/" : cleaned;
+};
 
 /**
  * Every message passed to `new Notice(...)`, oldest first.
@@ -47,3 +54,12 @@ export class Modal {
 export class ButtonComponent {
 	constructor(public containerEl: unknown) {}
 }
+
+/**
+ * The tested modules import this for their HTTP calls but no test drives a
+ * network path: anything reaching here is a test that should have been written
+ * against a fake client instead.
+ */
+export const requestUrl = (): never => {
+	throw new Error("requestUrl is not available under the obsidian test stub");
+};
