@@ -10,6 +10,12 @@ Specifically check:
 - The **Configuration** settings table
 - The **Prerequisites** section if new external tools are required
 
+## Changelog maintenance
+
+In the same pass as the README, add an entry to `CHANGELOG.md` under `## [Unreleased]`, in the `Added`, `Changed`, `Fixed`, `Removed` or `Deprecated` section that fits. Write what the plugin now does for a user, not which code changed; a reader of the entry has never seen the diff. Skip only refactors, tests and internal notes that no user could observe.
+
+At release time, rename `[Unreleased]` to the new version with its date, open a fresh empty `[Unreleased]` above it, update the two link definitions at the bottom, and paste the version's section into the GitHub release body so the release page and the file agree.
+
 ## Download sources
 
 The download command tries arXiv and then whatever `getDownloadFallback()` in `src/api/fallback-source.ts` returns, against the `DownloadFallback` interface in `src/api/download-fallback.ts`. That indirection is deliberate: the picker's row gating, progress messages and error reporting are all written against the interface, so a build with a fallback and a build without one share every line of the download path except that one function.
