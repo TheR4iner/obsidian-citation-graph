@@ -6,6 +6,8 @@ Each released version here is also the body of the matching [GitHub release](htt
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-08-27
+
 ### Added
 
 - Right-clicking a paper node on a canvas now offers its per-paper commands directly: *Expand paper*, *Set paper status*, *Cycle reading status*, *Download*, *Write summary* and *Delete paper*. With several nodes selected the same entries appear, minus *Expand paper*, and each one says how many papers it will act on. Nodes that are not literature notes get no entries, and every command is still in the command palette.
@@ -44,5 +46,6 @@ First public release.
 - **Sync canvas to Zotero**, **Send papers to canvas**, **Relayout canvas**, **Delete paper**, and **Clear Semantic Scholar cache**.
 - Settings for the collections folder, the Zotero and Semantic Scholar API keys, node size, the five status colours, and the full LLM configuration.
 
-[Unreleased]: https://github.com/TheR4iner/obsidian-citation-graph/compare/0.1.0...HEAD
+[Unreleased]: https://github.com/TheR4iner/obsidian-citation-graph/compare/0.2.0...HEAD
+[0.2.0]: https://github.com/TheR4iner/obsidian-citation-graph/compare/0.1.0...0.2.0
 [0.1.0]: https://github.com/TheR4iner/obsidian-citation-graph/releases/tag/0.1.0
