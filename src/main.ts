@@ -57,6 +57,7 @@ import type { BannedPaper } from "./types";
 import { LiteratureNoteManager, readFrontmatterArxiv } from "./notes/literature";
 import { hasSummarySection, insertSummaryText } from "./notes/summary-text";
 import { buildCanvas, expandCanvas } from "./canvas/builder";
+import { registerCanvasPaperMenu } from "./canvas/node-menu";
 import { hasPaperNode, resolvePaperNodeId, layoutPapers, layoutNewPapers } from "./canvas/layout";
 import { S2RefCache } from "./api/s2-cache";
 import * as fs from "fs";
@@ -116,31 +117,31 @@ export default class CitationGraphPlugin extends Plugin {
 
     this.addCommand({
       id: "create-from-collection",
-      name: "Create from collection",
+      name: "Canvas: create from collection",
       callback: () => this.createFromCollection(),
     });
 
     this.addCommand({
       id: "create-from-tag",
-      name: "Create from tag",
+      name: "Canvas: create from tag",
       callback: () => this.createFromTag(),
     });
 
     this.addCommand({
       id: "expand-paper",
-      name: "Expand paper",
-      callback: () => this.expandPaper(),
+      name: "Papers: expand paper",
+      checkCallback: this.canvasCommand(() => this.expandPaper()),
     });
 
     this.addCommand({
       id: "expand-paper-refresh",
-      name: "Expand paper (force refresh)",
-      callback: () => this.expandPaper({ forceRefresh: true }),
+      name: "Papers: expand paper (force refresh)",
+      checkCallback: this.canvasCommand(() => this.expandPaper({ forceRefresh: true })),
     });
 
     this.addCommand({
       id: "clear-s2-cache",
-      name: "Clear Semantic Scholar cache",
+      name: "Maintenance: clear Semantic Scholar cache",
       callback: async () => {
         this.s2Cache.clear();
         await this.s2Cache.save();
@@ -150,69 +151,146 @@ export default class CitationGraphPlugin extends Plugin {
 
     this.addCommand({
       id: "relayout-canvas",
-      name: "Relayout canvas",
-      callback: () => this.relayoutCanvas(),
+      name: "Canvas: relayout",
+      checkCallback: this.canvasCommand(() => this.relayoutCanvas()),
     });
 
     this.addCommand({
       id: "sync-to-zotero",
-      name: "Sync canvas to Zotero",
-      callback: () => this.syncToZotero(),
+      name: "Canvas: sync to Zotero",
+      checkCallback: this.canvasCommand(() => this.syncToZotero()),
     });
 
     this.addCommand({
       id: "download-papers",
-      name: "Download",
-      callback: () => this.downloadPapersFromCanvas(),
+      name: "PDFs: download",
+      checkCallback: this.canvasCommand(() => this.downloadPapersFromCanvas()),
     });
 
     this.addCommand({
       id: "add-paper-by-doi",
-      name: "Add paper by DOI or arXiv",
-      callback: () => this.addPaperByDoi(),
+      name: "Papers: add by DOI or arXiv",
+      checkCallback: this.canvasCommand(() => this.addPaperByDoi()),
     });
 
     this.addCommand({
       id: "refresh-reading-status",
-      name: "Refresh reading status",
-      callback: () => this.refreshReadingStatus(),
+      name: "Reading: refresh reading status",
+      checkCallback: this.canvasCommand(() => this.refreshReadingStatus()),
     });
 
     this.addCommand({
       id: "set-paper-status",
-      name: "Set paper status",
-      callback: () => this.setPaperStatus(),
+      name: "Reading: set paper status",
+      checkCallback: this.canvasCommand(() => this.setPaperStatus()),
     });
 
     this.addCommand({
       id: "toggle-read-status",
-      name: "Cycle reading status",
-      callback: () => this.cycleReadingStatus(),
+      name: "Reading: cycle reading status",
+      checkCallback: this.canvasCommand(() => this.cycleReadingStatus()),
     });
 
     this.addCommand({
       id: "send-papers-to-canvas",
-      name: "Send papers to canvas",
-      callback: () => this.sendPapersToCanvas(),
+      name: "Canvas: send papers to another canvas",
+      checkCallback: this.canvasCommand(() => this.sendPapersToCanvas()),
     });
 
     this.addCommand({
       id: "write-summary",
-      name: "Write summary",
-      callback: () => this.writeSummary(),
+      name: "PDFs: write summary",
+      checkCallback: this.canvasCommand(() => this.writeSummary()),
     });
 
     this.addCommand({
       id: "recommend-papers",
-      name: "Recommend papers",
-      callback: () => this.recommendPapers(),
+      name: "Papers: recommend papers",
+      checkCallback: this.canvasCommand(() => this.recommendPapers()),
     });
 
     this.addCommand({
       id: "delete-paper",
-      name: "Delete paper",
-      callback: () => this.deletePaper(),
+      name: "Papers: delete paper",
+      checkCallback: this.canvasCommand(() => this.deletePaper()),
     });
+
+    this.registerPaperContextMenu();
+  }
+
+  /**
+   * Wrap a command that only means anything with a canvas open, so it is
+   * absent from the command palette the rest of the time rather than present
+   * and guaranteed to fail. Obsidian still lists it in the hotkey settings,
+   * and an assigned hotkey simply does nothing while no canvas is open.
+   *
+   * The availability test is the same lookup the commands themselves use, so
+   * a command is offered exactly when it would find a canvas to act on.
+   */
+  private canvasCommand(run: () => unknown): (checking: boolean) => boolean {
+    return (checking: boolean): boolean => {
+      if (!this.findActiveCanvas()) return false;
+      if (!checking) run();
+      return true;
+    };
+  }
+
+  /**
+   * Mirror the per-paper commands onto the canvas right-click menu. Every one
+   * of them stays in the command palette: this is a second way in for a paper
+   * the user has already pointed at, not a replacement. Actions receive the
+   * clicked nodes explicitly, so they do not depend on right-click having
+   * moved the canvas selection.
+   */
+  private registerPaperContextMenu(): void {
+    const isPaperNote = (path: string): boolean => {
+      const file = this.app.vault.getAbstractFileByPath(path);
+      if (!(file instanceof TFile)) return false;
+      // Built per call so a changed collections folder is picked up without
+      // a plugin reload. isPaperNote only reads the metadata cache.
+      const noteManager = new LiteratureNoteManager(
+        this.app,
+        normalizePath(this.settings.collectionsFolder)
+      );
+      return noteManager.isPaperNote(file);
+    };
+
+    const plural = (verb: string, noun: string) => (count: number) =>
+      count === 1 ? `${verb} ${noun}` : `${verb} ${count} ${noun}s`;
+
+    registerCanvasPaperMenu(this, isPaperNote, [
+      {
+        title: "Expand references and citations",
+        icon: "git-fork",
+        singleOnly: true,
+        run: (paths) => this.expandPaper({ notePath: paths[0] }),
+      },
+      {
+        title: plural("Set status of", "paper"),
+        icon: "book-open",
+        run: (paths) => this.setPaperStatus(paths),
+      },
+      {
+        title: plural("Cycle status of", "paper"),
+        icon: "refresh-cw",
+        run: (paths) => this.cycleReadingStatus(paths),
+      },
+      {
+        title: plural("Download", "PDF"),
+        icon: "download",
+        run: (paths) => this.downloadPapersFromCanvas(paths),
+      },
+      {
+        title: plural("Write", "summary"),
+        icon: "file-text",
+        run: (paths) => this.writeSummary(paths),
+      },
+      {
+        title: plural("Delete", "paper"),
+        icon: "trash-2",
+        run: (paths) => this.deletePaper(paths),
+      },
+    ]);
   }
 
   onunload(): void {
@@ -512,27 +590,12 @@ export default class CitationGraphPlugin extends Plugin {
 
   // ─── Expand Paper ───────────────────────────────────────────
 
-  private async expandPaper(opts?: { forceRefresh?: boolean }): Promise<void> {
+  private async expandPaper(opts?: { forceRefresh?: boolean; notePath?: string }): Promise<void> {
     try {
       // 1. Get the active canvas file
-      let activeFile = this.app.workspace.getActiveFile();
-
-      // If the active file isn't a canvas, search all open leaves for one
-      if (!activeFile || activeFile.extension !== "canvas") {
-        const canvasLeaves = this.app.workspace.getLeavesOfType("canvas");
-        for (const leaf of canvasLeaves) {
-          const file = (leaf.view as any)?.file;
-          if (file instanceof TFile && file.extension === "canvas") {
-            activeFile = file;
-            break;
-          }
-        }
-      }
-
-      if (!activeFile || activeFile.extension !== "canvas") {
-        logNotice(
-          "Open a citation graph canvas first, then run this command."
-        );
+      const activeFile = this.findActiveCanvas();
+      if (!activeFile) {
+        logNotice("Open a citation graph canvas first, then run this command.");
         return;
       }
 
@@ -555,21 +618,26 @@ export default class CitationGraphPlugin extends Plugin {
         return;
       }
 
-      // Find a paper to expand — check canvas selection first
-      let targetNotePath: string | null = null;
+      // Find a paper to expand: the caller's node, else the canvas selection
+      let targetNotePath: string | null =
+        opts?.notePath && fileNodes.some((n) => n.file === opts.notePath)
+          ? opts.notePath
+          : null;
 
       // Check if a node is selected on the canvas
-      const canvasLeaves = this.app.workspace.getLeavesOfType("canvas");
-      for (const leaf of canvasLeaves) {
-        const canvas = (leaf.view as any)?.canvas;
-        if (!canvas) continue;
-        const selection = canvas.selection;
-        if (selection && selection.size === 1) {
-          const selectedNode = selection.values().next().value;
-          const filePath = selectedNode?.filePath || selectedNode?.file?.path;
-          if (filePath && fileNodes.some((n) => n.file === filePath)) {
-            targetNotePath = filePath;
-            break;
+      if (!targetNotePath) {
+        const canvasLeaves = this.app.workspace.getLeavesOfType("canvas");
+        for (const leaf of canvasLeaves) {
+          const canvas = (leaf.view as any)?.canvas;
+          if (!canvas) continue;
+          const selection = canvas.selection;
+          if (selection && selection.size === 1) {
+            const selectedNode = selection.values().next().value;
+            const filePath = selectedNode?.filePath || selectedNode?.file?.path;
+            if (filePath && fileNodes.some((n) => n.file === filePath)) {
+              targetNotePath = filePath;
+              break;
+            }
           }
         }
       }
@@ -795,19 +863,8 @@ export default class CitationGraphPlugin extends Plugin {
   private async addPaperByDoi(): Promise<void> {
     try {
       // 1. Find the active canvas
-      let activeFile = this.app.workspace.getActiveFile();
-      if (!activeFile || activeFile.extension !== "canvas") {
-        const canvasLeaves = this.app.workspace.getLeavesOfType("canvas");
-        for (const leaf of canvasLeaves) {
-          const file = (leaf.view as any)?.file;
-          if (file instanceof TFile && file.extension === "canvas") {
-            activeFile = file;
-            break;
-          }
-        }
-      }
-
-      if (!activeFile || activeFile.extension !== "canvas") {
+      const activeFile = this.findActiveCanvas();
+      if (!activeFile) {
         logNotice("Open a citation graph canvas first, then run this command.");
         return;
       }
@@ -1344,22 +1401,11 @@ export default class CitationGraphPlugin extends Plugin {
 
   // ─── Download Papers ────────────────────────────────────
 
-  private async downloadPapersFromCanvas(): Promise<void> {
+  private async downloadPapersFromCanvas(paths?: string[]): Promise<void> {
     try {
       // 1. Find the active canvas
-      let activeFile = this.app.workspace.getActiveFile();
-      if (!activeFile || activeFile.extension !== "canvas") {
-        const canvasLeaves = this.app.workspace.getLeavesOfType("canvas");
-        for (const leaf of canvasLeaves) {
-          const file = (leaf.view as any)?.file;
-          if (file instanceof TFile && file.extension === "canvas") {
-            activeFile = file;
-            break;
-          }
-        }
-      }
-
-      if (!activeFile || activeFile.extension !== "canvas") {
+      const activeFile = this.findActiveCanvas();
+      if (!activeFile) {
         logNotice("Open a citation graph canvas first, then run this command.");
         return;
       }
@@ -1411,8 +1457,8 @@ export default class CitationGraphPlugin extends Plugin {
         return;
       }
 
-      // 4. Filter to canvas selection if any nodes are highlighted
-      const selectedPaths = this.getSelectedCanvasPaths(fileNodes);
+      // 4. Filter to the targeted papers if any nodes are highlighted
+      const selectedPaths = this.resolveTargetPaths(fileNodes, paths);
       const modalPapers = selectedPaths.length > 0
         ? papers.filter((p) => selectedPaths.includes(p.notePath!))
         : papers;
@@ -1486,19 +1532,8 @@ export default class CitationGraphPlugin extends Plugin {
       }
 
       // 1. Find the active canvas
-      let activeFile = this.app.workspace.getActiveFile();
-      if (!activeFile || activeFile.extension !== "canvas") {
-        const canvasLeaves = this.app.workspace.getLeavesOfType("canvas");
-        for (const leaf of canvasLeaves) {
-          const file = (leaf.view as any)?.file;
-          if (file instanceof TFile && file.extension === "canvas") {
-            activeFile = file;
-            break;
-          }
-        }
-      }
-
-      if (!activeFile || activeFile.extension !== "canvas") {
+      const activeFile = this.findActiveCanvas();
+      if (!activeFile) {
         logNotice("Open a citation graph canvas first, then run this command.");
         return;
       }
@@ -1749,9 +1784,9 @@ export default class CitationGraphPlugin extends Plugin {
    * "Read + notes written" is not offered here: it is derived from the note
    * body when the canvas is painted, so there is no stored value to set.
    */
-  private async setPaperStatus(): Promise<void> {
+  private async setPaperStatus(paths?: string[]): Promise<void> {
     try {
-      const targets = await this.resolveCanvasTargets();
+      const targets = await this.resolveCanvasTargets(paths);
       if (!targets) return;
 
       const status = await StatusPickerModal.pick(this.app, targets.targetPaths.length);
@@ -1776,9 +1811,9 @@ export default class CitationGraphPlugin extends Plugin {
    * marking progress without opening the picker. Abandoned papers re-enter
    * the cycle at the start; annotated is skipped because it is derived.
    */
-  private async cycleReadingStatus(): Promise<void> {
+  private async cycleReadingStatus(paths?: string[]): Promise<void> {
     try {
-      const targets = await this.resolveCanvasTargets();
+      const targets = await this.resolveCanvasTargets(paths);
       if (!targets) return;
 
       let lastStatus: PaperStatus | null = null;
@@ -1857,10 +1892,10 @@ export default class CitationGraphPlugin extends Plugin {
 
   // ─── Delete Paper ───────────────────────────────────────────
 
-  private async deletePaper(): Promise<void> {
+  private async deletePaper(paths?: string[]): Promise<void> {
     try {
       // 1. Resolve the canvas and which papers to delete
-      const targets = await this.resolveCanvasTargets();
+      const targets = await this.resolveCanvasTargets(paths);
       if (!targets) return;
       const { canvasFile: activeFile, canvasData, targetPaths } = targets;
 
@@ -1942,6 +1977,22 @@ export default class CitationGraphPlugin extends Plugin {
       console.error("Citation Graph: Error deleting paper", e);
       logNotice(`Error: ${e instanceof Error ? e.message : String(e)}`);
     }
+  }
+
+  /**
+   * Which papers a per-paper command acts on: the caller's explicit list when
+   * there is one (the canvas context menu passes the clicked nodes), else the
+   * canvas selection. Either way the result is restricted to paths that are
+   * actually on this canvas.
+   */
+  private resolveTargetPaths(
+    fileNodes: { file?: string }[],
+    overridePaths?: string[]
+  ): string[] {
+    if (!overridePaths || overridePaths.length === 0) {
+      return this.getSelectedCanvasPaths(fileNodes);
+    }
+    return overridePaths.filter((p) => fileNodes.some((n) => n.file === p));
   }
 
   /**
@@ -2046,7 +2097,7 @@ export default class CitationGraphPlugin extends Plugin {
    * chosen from a picker. Returns null after telling the user why there is
    * nothing to act on.
    */
-  private async resolveCanvasTargets(): Promise<{
+  private async resolveCanvasTargets(overridePaths?: string[]): Promise<{
     canvasFile: TFile;
     canvasData: CanvasData & { citationGraphMeta?: Record<string, unknown> };
     targetPaths: string[];
@@ -2067,7 +2118,7 @@ export default class CitationGraphPlugin extends Plugin {
       return null;
     }
 
-    const targetPaths = this.getSelectedCanvasPaths(fileNodes);
+    const targetPaths = this.resolveTargetPaths(fileNodes, overridePaths);
     if (targetPaths.length === 0) {
       const picked = await this.pickPaperNode(fileNodes);
       if (!picked) {
@@ -2084,20 +2135,9 @@ export default class CitationGraphPlugin extends Plugin {
 
   private async relayoutCanvas(): Promise<void> {
     try {
-      // Find the canvas file (same logic as expandPaper)
-      let activeFile = this.app.workspace.getActiveFile();
-      if (!activeFile || activeFile.extension !== "canvas") {
-        const canvasLeaves = this.app.workspace.getLeavesOfType("canvas");
-        for (const leaf of canvasLeaves) {
-          const file = (leaf.view as any)?.file;
-          if (file instanceof TFile && file.extension === "canvas") {
-            activeFile = file;
-            break;
-          }
-        }
-      }
-
-      if (!activeFile || activeFile.extension !== "canvas") {
+      // Find the canvas file
+      const activeFile = this.findActiveCanvas();
+      if (!activeFile) {
         logNotice("Open a citation graph canvas first, then run this command.");
         return;
       }
@@ -2223,19 +2263,8 @@ export default class CitationGraphPlugin extends Plugin {
   private async sendPapersToCanvas(): Promise<void> {
     try {
       // 1. Find active canvas
-      let activeFile = this.app.workspace.getActiveFile();
-      if (!activeFile || activeFile.extension !== "canvas") {
-        const canvasLeaves = this.app.workspace.getLeavesOfType("canvas");
-        for (const leaf of canvasLeaves) {
-          const file = (leaf.view as any)?.file;
-          if (file instanceof TFile && file.extension === "canvas") {
-            activeFile = file;
-            break;
-          }
-        }
-      }
-
-      if (!activeFile || activeFile.extension !== "canvas") {
+      const activeFile = this.findActiveCanvas();
+      if (!activeFile) {
         logNotice("Open a citation graph canvas first, then run this command.");
         return;
       }
@@ -2544,22 +2573,11 @@ export default class CitationGraphPlugin extends Plugin {
 
   // ─── Write Summary ──────────────────────────────────────────
 
-  private async writeSummary(): Promise<void> {
+  private async writeSummary(paths?: string[]): Promise<void> {
     try {
       // 1. Find active canvas
-      let activeFile = this.app.workspace.getActiveFile();
-      if (!activeFile || activeFile.extension !== "canvas") {
-        const canvasLeaves = this.app.workspace.getLeavesOfType("canvas");
-        for (const leaf of canvasLeaves) {
-          const file = (leaf.view as any)?.file;
-          if (file instanceof TFile && file.extension === "canvas") {
-            activeFile = file;
-            break;
-          }
-        }
-      }
-
-      if (!activeFile || activeFile.extension !== "canvas") {
+      const activeFile = this.findActiveCanvas();
+      if (!activeFile) {
         logNotice("Open a citation graph canvas first, then run this command.");
         return;
       }
@@ -2582,8 +2600,8 @@ export default class CitationGraphPlugin extends Plugin {
         return;
       }
 
-      // 2. Get selected nodes (supports multiple)
-      const selectedPaths = this.getSelectedCanvasPaths(fileNodes);
+      // 2. Get target nodes (supports multiple)
+      const selectedPaths = this.resolveTargetPaths(fileNodes, paths);
       let targetPaths: string[];
 
       if (selectedPaths.length > 0) {
