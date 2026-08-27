@@ -8,6 +8,7 @@ Each released version here is also the body of the matching [GitHub release](htt
 
 ### Added
 
+- Right-clicking a paper node on a canvas now offers its per-paper commands directly: *Expand paper*, *Set paper status*, *Cycle reading status*, *Download*, *Write summary* and *Delete paper*. With several nodes selected the same entries appear, minus *Expand paper*, and each one says how many papers it will act on. Nodes that are not literature notes get no entries, and every command is still in the command palette.
 - **Recommend papers**: describes the current canvas to the same LLM used for summaries, asks which further papers belong on it, and offers the answers in the checkbox list *Expand paper* uses. Accepted papers arrive with notes, nodes and citation edges to the rest of the canvas. A prompt box at invocation replaces the default instructions for one run, and *Include abstracts* there sends abstracts as well as titles, off by default.
 - Every suggestion is checked against Semantic Scholar, OpenAlex, arXiv and Crossref before it is offered. A paper no source can find is discarded, as is one whose DOI turns out to belong to a different paper; both counts are reported and the titles go to `citation-graph.log`.
 - Web search during recommendations, where the provider has it: the Anthropic API, Google Gemini and the Claude CLI. The OpenAI endpoint used here has no search tool, and the prompt box says so rather than implying otherwise.
@@ -16,6 +17,8 @@ Each released version here is also the body of the matching [GitHub release](htt
 
 ### Changed
 
+- Commands are now grouped in the command palette by a second prefix: **Canvas**, **Papers**, **Reading**, **PDFs** and **Maintenance**. Typing the group name narrows the palette to that group. Existing hotkeys are unaffected.
+- The thirteen commands that need an open canvas no longer appear in the command palette while none is open, so the palette stays short when you are reading a note. *Create from collection*, *Create from tag* and *Clear Semantic Scholar cache* are always available. Hotkeys are unaffected and every command is still listed under Settings, Hotkeys.
 - Semantic Scholar requests are now retried after 5, 15 and 45 seconds when the service throttles them, with the wait shown in the notice, instead of failing on the spot. With an API key configured, requests are spaced 1 second apart rather than 3.
 - The default model for the Anthropic API and the Claude CLI is now `claude-sonnet-5`.
 - Clearing the **Collections folder** setting now keeps collection directories at the top of the vault instead of snapping back to `collections`. Leading and trailing slashes are stripped, so `/` and an empty value mean the same thing.

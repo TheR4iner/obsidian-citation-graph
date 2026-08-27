@@ -35,27 +35,33 @@ Not yet in the community marketplace, so install by hand:
 
 ## Commands
 
-All are in the command palette under `Citation Graph:`.
+All are in the command palette under `Citation Graph:`, grouped by a second prefix so that typing the group narrows the list: **Canvas**, **Papers**, **Reading**, **PDFs**, **Maintenance**. The rest of this page refers to each command by its short name.
+
+Only three of them work without a canvas open: *Create from collection*, *Create from tag* and *Clear Semantic Scholar cache*. The other thirteen are hidden from the palette until a canvas is open, so the list stays short while you are reading a note.
 
 | Command | What it does |
 |---|---|
-| **Create from collection** | Builds a canvas from a Zotero collection, into `<collections folder>/<collection name>/` |
-| **Create from tag** | Builds a canvas from an intersection of Zotero tags, into a folder named after the tags |
-| **Expand paper** | Adds a paper's references and citing works; **(force refresh)** bypasses the local cache |
-| **Add paper by DOI or arXiv** | Adds one paper from a DOI, an arXiv ID, or a URL containing either |
-| **Write summary** | Writes an LLM summary into the note under `## Summary` |
-| **Recommend papers** | Asks the LLM which papers would fit this canvas, verifies them, and adds the ones you pick |
-| **Download** | Fetches PDFs for papers on the canvas |
-| **Set paper status** | Sets the selected papers to *to read*, *reading*, *read*, or *abandoned* |
-| **Cycle reading status** | Advances the selection one step through *to read*, *reading*, *read*. Good on a hotkey |
-| **Refresh reading status** | Repaints every paper on the canvas from its note |
-| **Relayout canvas** | Re-sorts nodes chronologically, discarding manual positions |
-| **Sync canvas to Zotero** | Pushes the canvas's papers back to a Zotero collection |
-| **Send papers to canvas** | Copies or moves papers, with their edges, to another canvas |
-| **Delete paper** | Deletes the node, its edges and the literature note together |
-| **Clear Semantic Scholar cache** | Drops cached reference data if you suspect it is stale |
+| **Canvas: create from collection** | Builds a canvas from a Zotero collection, into `<collections folder>/<collection name>/` |
+| **Canvas: create from tag** | Builds a canvas from an intersection of Zotero tags, into a folder named after the tags |
+| **Canvas: relayout** | Re-sorts nodes chronologically, discarding manual positions |
+| **Canvas: sync to Zotero** | Pushes the canvas's papers back to a Zotero collection |
+| **Canvas: send papers to another canvas** | Copies or moves papers, with their edges, to another canvas |
+| **Papers: expand paper** | Adds a paper's references and citing works; **(force refresh)** bypasses the local cache |
+| **Papers: add by DOI or arXiv** | Adds one paper from a DOI, an arXiv ID, or a URL containing either |
+| **Papers: recommend papers** | Asks the LLM which papers would fit this canvas, verifies them, and adds the ones you pick |
+| **Papers: delete paper** | Deletes the node, its edges and the literature note together |
+| **Reading: set paper status** | Sets the selected papers to *to read*, *reading*, *read*, or *abandoned* |
+| **Reading: cycle reading status** | Advances the selection one step through *to read*, *reading*, *read*. Good on a hotkey |
+| **Reading: refresh reading status** | Repaints every paper on the canvas from its note |
+| **PDFs: download** | Fetches PDFs for papers on the canvas |
+| **PDFs: write summary** | Writes an LLM summary into the note under `## Summary` |
+| **Maintenance: clear Semantic Scholar cache** | Drops cached reference data if you suspect it is stale |
 
-Commands that act on papers take the current canvas selection, and fall back to a fuzzy picker when nothing is selected.
+Commands that act on papers take the current canvas selection, and fall back to a fuzzy picker when nothing is selected. Renaming a command does not change its ID, so any hotkey you had assigned still works; a hotkey for a canvas command does nothing while no canvas is open, and every command stays listed under Settings, Hotkeys either way.
+
+### On the canvas
+
+Right-clicking a paper node offers the per-paper commands directly: *Expand paper*, *Set paper status*, *Cycle reading status*, *Download*, *Write summary* and *Delete paper*. Right-clicking with several nodes selected offers the same entries minus *Expand paper*, which acts on one paper at a time, and each entry names how many papers it will touch. Nodes that are not literature notes get no entries. Every command remains in the palette regardless.
 
 ### Worth knowing
 
