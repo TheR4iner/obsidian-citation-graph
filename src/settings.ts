@@ -105,14 +105,16 @@ export class CitationGraphSettingTab extends PluginSettingTab {
     // --- Folders ---
     new Setting(containerEl)
       .setName("Collections folder")
-      .setDesc("Root folder for collections. Each Zotero collection gets its own subdirectory containing both the canvas and literature notes.")
+      .setDesc("Root folder for collections. Each Zotero collection gets its own subdirectory containing both the canvas and literature notes. Leave empty to use the vault root.")
       .addText((text) => {
         new FolderSuggest(this.app, text.inputEl);
         text
-          .setPlaceholder("collections")
+          .setPlaceholder("collections (empty = vault root)")
           .setValue(this.plugin.settings.collectionsFolder)
           .onChange(async (value) => {
-            this.plugin.settings.collectionsFolder = value.trim() || "collections";
+            // An empty value is meaningful: it means the vault root. Only the
+            // separator characters are stripped, so "/" and "" agree.
+            this.plugin.settings.collectionsFolder = value.trim().replace(/^\/+|\/+$/g, "");
             await this.plugin.saveSettings();
           });
       });

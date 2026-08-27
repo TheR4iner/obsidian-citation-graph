@@ -298,6 +298,9 @@ ${paper.arxiv ? `**arXiv**: [${escapeNoteText(paper.arxiv)}](https://arxiv.org/a
 
   /** Recursively ensure a folder path exists */
   private async ensureFolder(folderPath: string): Promise<void> {
+    // The vault root always exists and cannot be created: normalizePath maps
+    // an empty collections folder (meaning "the vault root") to "/".
+    if (!folderPath || folderPath === "/") return;
     if (this.app.vault.getAbstractFileByPath(folderPath)) return;
     // Ensure parent exists first
     const parent = folderPath.split("/").slice(0, -1).join("/");

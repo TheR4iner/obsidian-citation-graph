@@ -14,6 +14,8 @@ export interface FakeVault {
 	files: TFile[];
 	/** The TFile for a path already added to the vault. */
 	file(path: string): TFile;
+	/** Every path passed to `vault.createFolder`, in call order. */
+	createdFolders: string[];
 }
 
 /**
@@ -35,6 +37,8 @@ export interface FakeVault {
 export function makeVault(notes: Record<string, Partial<FakeNote>>): FakeVault {
 	const stored = new Map<string, FakeNote>();
 	const files = new Map<string, TFile>();
+	const folders = new Set<string>();
+	const createdFolders: string[] = [];
 
 	for (const [path, note] of Object.entries(notes)) {
 		stored.set(path, { fm: note.fm ?? null, body: note.body ?? "" });
@@ -62,7 +66,19 @@ export function makeVault(notes: Record<string, Partial<FakeNote>>): FakeVault {
 				noteFor(file).body = content;
 			},
 			getMarkdownFiles: () => [...files.values()],
-			getAbstractFileByPath: (path: string) => files.get(path) ?? null,
+			getAbstractFileByPath: (path: string) =>
+				files.get(path) ?? (folders.has(path) ? ({ path } as unknown as TFile) : null),
+			create: async (path: string, content: string) => {
+				const basename = path.replace(/^.*\//, "").replace(/\.md$/, "");
+				const file = { path, basename, extension: "md" } as TFile;
+				files.set(path, file);
+				stored.set(path, { fm: null, body: content });
+				return file;
+			},
+			createFolder: async (path: string) => {
+				createdFolders.push(path);
+				folders.add(path);
+			},
 		},
 		fileManager: {
 			processFrontMatter: async (
@@ -86,6 +102,7 @@ export function makeVault(notes: Record<string, Partial<FakeNote>>): FakeVault {
 			if (!file) throw new Error(`fake vault has no note at ${path}`);
 			return file;
 		},
+		createdFolders,
 	};
 }
 
