@@ -181,6 +181,14 @@ export interface CitationGraphSettings {
 	llmBatchTokenBudget: number;
 	claudeCliPath: string;
 	summaryPrompt: string;
+	/** Custom instruction block for the Recommend papers command. Blank = built-in default. */
+	recommendPrompt: string;
+	/** How many papers the recommendation prompt asks for. */
+	recommendCount: number;
+	/** Let the provider search the web while recommending, where it supports one. */
+	recommendWebSearch: boolean;
+	/** Max output tokens for a recommendation call (separate: the list is longer than a summary). */
+	recommendMaxOutputTokens: number;
 }
 
 export const DEFAULT_SETTINGS: CitationGraphSettings = {
@@ -206,6 +214,10 @@ export const DEFAULT_SETTINGS: CitationGraphSettings = {
 	llmBatchTokenBudget: 0,
 	claudeCliPath: "",
 	summaryPrompt: "",
+	recommendPrompt: "",
+	recommendCount: 10,
+	recommendWebSearch: true,
+	recommendMaxOutputTokens: 4096,
 };
 
 /** The configured canvas color for a given display status. */
@@ -259,11 +271,24 @@ export function isLlmConfigured(settings: CitationGraphSettings): boolean {
 	return !!resolveApiKeys(settings).llmApiKey;
 }
 
-/** Return value from an LLM summarization call */
+/** Return value from an LLM call */
 export interface LlmResponse {
 	text: string;
 	inputTokens: number;
 	outputTokens: number;
+	/**
+	 * Why the provider stopped, verbatim, when it says. Callers use it to tell
+	 * a reply that was cut off at the token cap ("max_tokens", "length",
+	 * "MAX_TOKENS") from one the model simply finished.
+	 */
+	stopReason?: string;
+}
+
+/** Whether a stop reason means the reply was cut off at the output cap. */
+export function wasTruncated(stopReason: string | undefined): boolean {
+	if (!stopReason) return false;
+	const lowered = stopReason.toLowerCase();
+	return lowered === "max_tokens" || lowered === "length";
 }
 
 /** Zotero API response types */

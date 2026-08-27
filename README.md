@@ -14,6 +14,8 @@ An Obsidian plugin that turns a Zotero collection into a **citation graph canvas
 
 **Fill it in.** *Download* fetches PDFs from arXiv. *Write summary* sends a PDF to Anthropic, OpenAI, Google Gemini, or a local Claude CLI and writes a structured summary into the note, with a progress bar and a token budget you can cap.
 
+**Ask for more.** *Recommend papers* describes the whole canvas to the same LLM and asks what else belongs on it, searching the web where the provider supports it. Every suggestion is checked against Semantic Scholar, OpenAlex, arXiv and Crossref before you see it, so invented papers never reach the picker, and the ones that survive are offered in the same checkbox list *Expand paper* uses.
+
 **Keep it tidy.** *Sync canvas to Zotero* pushes new papers back. *Send papers to canvas* copies or moves papers with their edges between canvases. *Relayout canvas* re-sorts by year. *Delete paper* removes the node, its edges and the note together, which Obsidian's own delete does not.
 
 ## Requirements
@@ -42,6 +44,7 @@ All are in the command palette under `Citation Graph:`.
 | **Expand paper** | Adds a paper's references and citing works; **(force refresh)** bypasses the local cache |
 | **Add paper by DOI or arXiv** | Adds one paper from a DOI, an arXiv ID, or a URL containing either |
 | **Write summary** | Writes an LLM summary into the note under `## Summary` |
+| **Recommend papers** | Asks the LLM which papers would fit this canvas, verifies them, and adds the ones you pick |
 | **Download** | Fetches PDFs for papers on the canvas |
 | **Set paper status** | Sets the selected papers to *to read*, *reading*, *read*, or *abandoned* |
 | **Cycle reading status** | Advances the selection one step through *to read*, *reading*, *read*. Good on a hotkey |
@@ -64,6 +67,12 @@ Commands that act on papers take the current canvas selection, and fall back to 
 
 **Download** saves as `Title (FirstAuthor) (Year).pdf`. Papers already in the target directory are marked `downloaded` and left unchecked; papers no configured source can supply are marked `no source` and cannot be selected. Only arXiv ships configured, so papers with no arXiv version cannot be fetched. Adding a source means implementing `DownloadFallback` (`src/api/download-fallback.ts`) and returning it from `src/api/fallback-source.ts`; the picker, progress reporting and error messages pick it up with no other changes.
 
+**Recommend papers** sends every paper's title, authors, year and identifiers, and nothing else, unless you tick *Include abstracts* in the prompt box. Abstracts cost roughly 250 extra input tokens per paper and, on a large canvas, tend to crowd out the titles, so leave them off unless a run has been giving vague suggestions. The prompt box overrides the *Recommendation prompt* setting for one run; the canvas listing and the required JSON reply format are appended by the plugin either way, so a custom prompt cannot break parsing. Suggestions that no citation source can find are discarded, as are ones whose DOI turns out to belong to a different paper: the count of each is reported, and the titles go to `citation-graph.log`.
+
+**A recommendation run takes minutes, and says so while it works.** The notice carries a running clock, so a long wait is visibly a wait rather than a hang. With the Claude CLI it also names what the model is doing as it happens, reading its event stream: thinking, searching the web for a given query, or writing the answer. The API providers are reached through Obsidian's `requestUrl`, which returns a response whole and cannot stream, so there the clock is all there is.
+
+**Semantic Scholar rate limits are retried, not swallowed.** Verification is one request per suggestion against a service that allows roughly 100 every 5 minutes without an API key, so ten suggestions take about half a minute and can be throttled anyway. A refused request is retried after 5, 15 and 45 seconds, and the notice says so while it waits. If it is still refused, verification stops and reports the remaining suggestions as *never checked* rather than discarding them as nonexistent. An API key raises the ceiling and cuts the spacing between requests from 3 seconds to 1, and takes effect as soon as you enter it.
+
 **Send papers to canvas** carries an edge over whenever both its endpoints exist on the target. It does not go looking for new ones: run *Expand paper* on the target for that.
 
 ## Settings
@@ -73,7 +82,7 @@ Commands that act on papers take the current canvas selection, and fall back to 
 | **Collections folder** | Root folder for canvases. Each canvas gets a subdirectory holding the canvas and its literature notes. Leave empty to use the vault root | `collections` |
 | **Zotero API key** | Needed only for syncing back to Zotero | |
 | **Zotero user ID** | Numeric ID from the same Zotero keys page | |
-| **Semantic Scholar API key** | Optional, raises the rate limit above the free 100 requests per 5 minutes | |
+| **Semantic Scholar API key** | Optional, raises the rate limit above the free 100 requests per 5 minutes and lets the plugin issue 1 request per second instead of 1 per 3 seconds | |
 | **Node width / height** | Canvas node size in pixels | 600 / 800 |
 | **To read** | Node colour for papers not started | No colour |
 | **Reading** | Node colour for papers in progress | Yellow |
@@ -87,6 +96,10 @@ Commands that act on papers take the current canvas selection, and fall back to 
 | **Max output tokens** | Cap per summary, controlling length and cost | 1024 |
 | **Batch token budget** | Stops a batch once this many tokens are spent; 0 is unlimited. Not tracked for Claude CLI | 0 |
 | **Summary prompt** | Replaces the built-in prompt. Supports `{title}`, `{authors}`, `{year}`; the PDF is attached automatically | |
+| **Papers to suggest** | How many papers *Recommend papers* asks for per run | 10 |
+| **Search the web** | Lets the model search while recommending. Supported by the Anthropic API, Gemini and the Claude CLI; the OpenAI endpoint used here has no search tool | On |
+| **Max output tokens** (Recommendations) | Cap per recommendation reply. A truncated reply cannot be read back, so this is higher than the summary cap | 4096 |
+| **Recommendation prompt** | Standing instructions for *Recommend papers*. The command's own prompt box overrides it for a single run | |
 | **Default download path** | Where PDFs are saved. Absolute, or starting with `~` | |
 
 ### How status colours are drawn
@@ -128,6 +141,8 @@ The **Zotero local API** on `localhost:23119` reads collections and items, needi
 - Citation edges are drawn only between papers both present on the canvas.
 - Semantic Scholar's free tier allows roughly 100 requests per 5 minutes, so a large collection takes a few minutes.
 - Only arXiv is configured as a PDF source, so papers without an arXiv version cannot be downloaded, and *Write summary* cannot reach their PDFs.
+- *Recommend papers* can only add a suggestion that some citation source can identify, so a genuinely obscure paper the model knows about may still be dropped.
+- Live progress during a recommendation run is available only with the Claude CLI; the API providers report elapsed time alone.
 
 ## Development
 

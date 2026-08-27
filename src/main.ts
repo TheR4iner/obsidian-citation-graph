@@ -3,12 +3,12 @@ import {
   Notice,
   TFile,
   normalizePath,
-  WorkspaceLeaf,
   FuzzySuggestModal,
   Modal,
   ButtonComponent,
 } from "obsidian";
-import { initLog, logNotice } from "./log";
+import { initLog, logNotice, logOnly } from "./log";
+import { ProgressNotice } from "./progress-notice";
 import type {
   CitationGraphSettings,
   Paper,
@@ -27,6 +27,7 @@ import {
   resolveApiKeys,
   statusColor,
   nextStatusInCycle,
+  wasTruncated,
   STATUS_LABELS,
 } from "./types";
 import { statusStyleRules } from "./canvas/status-styles";
@@ -43,6 +44,8 @@ import { TagPickerModal } from "./modals/tag-picker";
 import { ExpandPickerModal } from "./modals/expand-picker";
 import { DownloadPickerModal, downloadPapers, buildPaperFilename, expandTilde } from "./modals/download-picker";
 import { SendPickerModal } from "./modals/send-picker";
+import { RecommendPromptModal } from "./modals/recommend-prompt-modal";
+import { RecommendPickerModal } from "./modals/recommend-picker";
 import { StatusPickerModal } from "./modals/status-picker";
 import {
   PostAddSummaryModal,
@@ -58,7 +61,13 @@ import { hasPaperNode, resolvePaperNodeId, layoutPapers, layoutNewPapers } from 
 import { S2RefCache } from "./api/s2-cache";
 import * as fs from "fs";
 import * as path from "path";
-import { summarizePaper } from "./api/llm";
+import { summarizePaper, effectiveModel, providerSupportsWebSearch } from "./api/llm";
+import {
+  isAlreadyOnCanvas,
+  requestRecommendations,
+  verifyRecommendations,
+} from "./api/recommend";
+import type { CanvasPaperSummary, VerifiedRecommendation } from "./api/recommend";
 import { SummaryProgressModal } from "./modals/summary-progress-modal";
 
 /**
@@ -99,10 +108,11 @@ export default class CitationGraphPlugin extends Plugin {
     this.s2Cache = new S2RefCache(this.app.vault.adapter, pluginDir);
     await this.s2Cache.load();
 
-    this.s2Client = new SemanticScholarClient(resolveApiKeys(this.settings).semanticScholarApiKey);
-    this.openAlexClient = new OpenAlexClient(this.settings.openAlexEmail);
-    this.crossRefClient = new CrossRefClient(this.settings.openAlexEmail);
+    this.s2Client = new SemanticScholarClient();
+    this.openAlexClient = new OpenAlexClient();
+    this.crossRefClient = new CrossRefClient();
     this.arxivClient = new ArxivMetadataClient();
+    this.applyApiCredentials();
 
     this.addCommand({
       id: "create-from-collection",
@@ -193,6 +203,12 @@ export default class CitationGraphPlugin extends Plugin {
     });
 
     this.addCommand({
+      id: "recommend-papers",
+      name: "Recommend papers",
+      callback: () => this.recommendPapers(),
+    });
+
+    this.addCommand({
       id: "delete-paper",
       name: "Delete paper",
       callback: () => this.deletePaper(),
@@ -233,6 +249,21 @@ export default class CitationGraphPlugin extends Plugin {
   async saveSettings(): Promise<void> {
     await this.saveData(this.settings);
     this.applyStatusStyles();
+    this.applyApiCredentials();
+  }
+
+  /**
+   * Push the current keys and contact email into the long-lived API clients.
+   *
+   * The clients outlive any one command so their rate-limit spacing carries
+   * across commands; that also means they never see a credential entered after
+   * load unless it is handed to them here.
+   */
+  private applyApiCredentials(): void {
+    const resolved = resolveApiKeys(this.settings);
+    this.s2Client.setApiKey(resolved.semanticScholarApiKey);
+    this.openAlexClient.setEmail(this.settings.openAlexEmail);
+    this.crossRefClient.setEmail(this.settings.openAlexEmail);
   }
 
   /**
@@ -639,20 +670,8 @@ export default class CitationGraphPlugin extends Plugin {
       }
 
       // 6. Determine which papers are already on canvas (by S2 ID or DOI)
-      const existingS2Ids = new Set<string>();
-      for (const node of canvasData.nodes) {
-        if (node.type !== "file" || !node.file) continue;
-        const nf = this.app.vault.getAbstractFileByPath(node.file);
-        if (!(nf instanceof TFile)) continue;
-        const nc = this.app.metadataCache.getFileCache(nf);
-        if (nc?.frontmatter?.semantic_scholar_id) {
-          existingS2Ids.add(nc.frontmatter.semantic_scholar_id);
-        }
-        // Also track by synthetic DOI-based ID for multi-source papers
-        if (nc?.frontmatter?.doi) {
-          existingS2Ids.add(`doi:${nc.frontmatter.doi.toLowerCase()}`);
-        }
-      }
+      const canvasPapers = this.canvasPapers(canvasData);
+      const existingS2Ids = this.canvasPaperIds(canvasPapers);
 
       // 7. Show expand picker (filter out banned papers)
       const bannedPapers = canvasData.citationGraphMeta?.bannedPapers || [];
@@ -737,37 +756,7 @@ export default class CitationGraphPlugin extends Plugin {
       // For now, just add direct edges to the expanded paper
 
       // 11. Build all-papers map for canvas expansion
-      const allPapers = new Map<string, Paper>();
-      // Existing papers from canvas notes
-      for (const node of canvasData.nodes) {
-        if (node.type !== "file" || !node.file) continue;
-        const nf = this.app.vault.getAbstractFileByPath(node.file);
-        if (!(nf instanceof TFile)) continue;
-        const nc = this.app.metadataCache.getFileCache(nf);
-        if (!nc?.frontmatter) continue;
-        const nfm = nc.frontmatter;
-        const p: Paper = {
-          id: nfm.doi || nfm.semantic_scholar_id || node.id,
-          title: nfm.title || "",
-          authors: nfm.authors || [],
-          year: nfm.year || 0,
-          doi: nfm.doi || null,
-          arxiv: readFrontmatterArxiv(nfm),
-          citekey: nfm.citekey || null,
-          semanticScholarId: nfm.semantic_scholar_id || null,
-          abstract: null,
-          citationCount: null,
-          notePath: node.file,
-        };
-        allPapers.set(p.id, p);
-        if (p.semanticScholarId)
-          allPapers.set(p.semanticScholarId, p);
-      }
-      for (const p of newPapers) {
-        allPapers.set(p.id, p);
-        if (p.semanticScholarId)
-          allPapers.set(p.semanticScholarId, p);
-      }
+      const allPapers = this.indexPapers([...canvasPapers, ...newPapers]);
 
       // 12. Update canvas
       const updatedCanvas = expandCanvas(
@@ -893,71 +882,16 @@ export default class CitationGraphPlugin extends Plugin {
       // 6. Build edges to existing papers via resolved refs/citations.
       // Matches by S2 ID, DOI (case-insensitive), and arXiv ID, since fallback
       // sources (OpenAlex/CrossRef/arXiv) don't always provide an S2 ID.
-      const newEdges: CitationEdge[] = [];
-      {
-        const refIds = collectRefIdentifiers(resolved.references);
-        const citeIds = collectRefIdentifiers(resolved.citations);
-
-        for (const node of canvasData.nodes) {
-          if (node.type !== "file" || !node.file) continue;
-          const nf = this.app.vault.getAbstractFileByPath(node.file);
-          if (!(nf instanceof TFile)) continue;
-          const nc = this.app.metadataCache.getFileCache(nf);
-          const fm = nc?.frontmatter;
-          if (!fm) continue;
-
-          const nodeS2 = fm.semantic_scholar_id as string | undefined;
-          const nodeDoi = (fm.doi as string | undefined)?.toLowerCase();
-          const nodeArxiv = fm.arxiv as string | undefined;
-
-          const matchesRef =
-            (nodeS2 && refIds.s2.has(nodeS2)) ||
-            (nodeDoi && refIds.doi.has(nodeDoi)) ||
-            (nodeArxiv && refIds.arxiv.has(nodeArxiv));
-          const matchesCite =
-            (nodeS2 && citeIds.s2.has(nodeS2)) ||
-            (nodeDoi && citeIds.doi.has(nodeDoi)) ||
-            (nodeArxiv && citeIds.arxiv.has(nodeArxiv));
-
-          if (!matchesRef && !matchesCite) continue;
-
-          // Use the existing node's stable Paper.id (same precedence as
-          // buildPaperFromFrontmatter below) so it matches the allPapers map.
-          const otherId = (fm.doi as string | undefined) || nodeS2 || node.id;
-          const selfId = paper.id;
-
-          if (matchesRef) newEdges.push({ fromId: selfId, toId: otherId });
-          if (matchesCite) newEdges.push({ fromId: otherId, toId: selfId });
-        }
-      }
+      const canvasPapers = this.canvasPapers(canvasData);
+      const newEdges = this.buildCitationEdges(
+        paper,
+        resolved.references,
+        resolved.citations,
+        canvasPapers
+      );
 
       // 7. Build allPapers map for layout
-      const allPapers = new Map<string, Paper>();
-      for (const node of canvasData.nodes) {
-        if (node.type !== "file" || !node.file) continue;
-        const nf = this.app.vault.getAbstractFileByPath(node.file);
-        if (!(nf instanceof TFile)) continue;
-        const nc = this.app.metadataCache.getFileCache(nf);
-        if (!nc?.frontmatter) continue;
-        const nfm = nc.frontmatter;
-        const p: Paper = {
-          id: nfm.doi || nfm.semantic_scholar_id || node.id,
-          title: nfm.title || "",
-          authors: nfm.authors || [],
-          year: nfm.year || 0,
-          doi: nfm.doi || null,
-          arxiv: readFrontmatterArxiv(nfm),
-          citekey: nfm.citekey || null,
-          semanticScholarId: nfm.semantic_scholar_id || null,
-          abstract: null,
-          citationCount: null,
-          notePath: node.file,
-        };
-        allPapers.set(p.id, p);
-        if (p.semanticScholarId) allPapers.set(p.semanticScholarId, p);
-      }
-      allPapers.set(paper.id, paper);
-      if (paper.semanticScholarId) allPapers.set(paper.semanticScholarId, paper);
+      const allPapers = this.indexPapers([...canvasPapers, paper]);
 
       // 8. Update canvas
       const updatedCanvas = expandCanvas(
@@ -1011,6 +945,401 @@ export default class CitationGraphPlugin extends Plugin {
       console.error("Citation Graph: Error adding paper by DOI", e);
       logNotice(`Error: ${e instanceof Error ? e.message : String(e)}`);
     }
+  }
+
+  // ─── Recommend Papers ───────────────────────────────────
+
+  /**
+   * Every canvas node that points at a literature note, read back as a Paper.
+   * Abstract and citation count are left empty: they are not stored in
+   * frontmatter, and every caller either does not need them or fetches them.
+   */
+  private canvasPapers(canvasData: CanvasData): Paper[] {
+    const papers: Paper[] = [];
+    for (const node of canvasData.nodes) {
+      if (node.type !== "file" || !node.file) continue;
+      const file = this.app.vault.getAbstractFileByPath(node.file);
+      if (!(file instanceof TFile)) continue;
+      const fm = this.app.metadataCache.getFileCache(file)?.frontmatter;
+      if (!fm) continue;
+      papers.push({
+        id: fm.doi || fm.semantic_scholar_id || node.id,
+        title: fm.title || "",
+        authors: fm.authors || [],
+        year: fm.year || 0,
+        doi: fm.doi || null,
+        arxiv: readFrontmatterArxiv(fm),
+        citekey: fm.citekey || null,
+        semanticScholarId: fm.semantic_scholar_id || null,
+        abstract: null,
+        citationCount: null,
+        notePath: node.file,
+      });
+    }
+    return papers;
+  }
+
+  /**
+   * Index papers by every identifier the layout code might look them up by.
+   * Edges name papers by their stable id, but callers also resolve S2 IDs.
+   */
+  private indexPapers(papers: Paper[]): Map<string, Paper> {
+    const index = new Map<string, Paper>();
+    for (const paper of papers) {
+      index.set(paper.id, paper);
+      if (paper.semanticScholarId) index.set(paper.semanticScholarId, paper);
+    }
+    return index;
+  }
+
+  /** The identifiers that mark a paper as already present on a canvas. */
+  private canvasPaperIds(papers: Paper[]): Set<string> {
+    const ids = new Set<string>();
+    for (const paper of papers) {
+      if (paper.semanticScholarId) ids.add(paper.semanticScholarId);
+      if (paper.doi) ids.add(`doi:${paper.doi.toLowerCase()}`);
+    }
+    return ids;
+  }
+
+  /**
+   * Citation edges between one newly resolved paper and papers already known,
+   * matching on S2 ID, DOI and arXiv ID because the fallback sources
+   * (OpenAlex/CrossRef/arXiv) do not all supply an S2 ID.
+   */
+  private buildCitationEdges(
+    paper: Paper,
+    references: S2Paper[],
+    citations: S2Paper[],
+    others: Paper[],
+  ): CitationEdge[] {
+    const refIds = collectRefIdentifiers(references);
+    const citeIds = collectRefIdentifiers(citations);
+    const edges: CitationEdge[] = [];
+
+    for (const other of others) {
+      if (other.id === paper.id) continue;
+      const s2 = other.semanticScholarId;
+      const doi = other.doi?.toLowerCase();
+      const arxiv = other.arxiv;
+
+      const isReference =
+        (s2 && refIds.s2.has(s2)) ||
+        (doi && refIds.doi.has(doi)) ||
+        (arxiv && refIds.arxiv.has(arxiv));
+      const isCitation =
+        (s2 && citeIds.s2.has(s2)) ||
+        (doi && citeIds.doi.has(doi)) ||
+        (arxiv && citeIds.arxiv.has(arxiv));
+
+      if (isReference) edges.push({ fromId: paper.id, toId: other.id });
+      if (isCitation) edges.push({ fromId: other.id, toId: paper.id });
+    }
+
+    return edges;
+  }
+
+  /**
+   * Ask the configured LLM which papers would fit the current canvas, verify
+   * every suggestion against the citation sources, and offer the survivors in
+   * the same picker the Expand command uses.
+   *
+   * Verification is not optional: a model will happily invent a plausible
+   * title, authors and DOI, and an unverified suggestion cannot become a
+   * canvas node anyway because it has no identifier to hang edges off.
+   */
+  private async recommendPapers(): Promise<void> {
+    try {
+      if (!isLlmConfigured(this.settings)) {
+        logNotice(
+          "Configure the LLM settings first: Recommend papers uses the same provider as Write summary."
+        );
+        return;
+      }
+
+      const canvasFile = this.findActiveCanvas();
+      if (!canvasFile) {
+        logNotice("Open a citation graph canvas first, then run this command.");
+        return;
+      }
+
+      const canvasData = JSON.parse(await this.app.vault.read(canvasFile)) as CanvasData & {
+        citationGraphMeta?: {
+          bannedPapers?: BannedPaper[];
+          [key: string]: unknown;
+        };
+      };
+
+      if (!canvasData.nodes.some((n) => n.type === "file" && n.file)) {
+        logNotice("No paper nodes found on this canvas.");
+        return;
+      }
+
+      const existingPapers = this.canvasPapers(canvasData);
+      if (existingPapers.length === 0) {
+        logNotice(
+          "The notes behind this canvas have no frontmatter, so there is nothing to describe to the model."
+        );
+        return;
+      }
+
+      const settings = resolveApiKeys(this.settings);
+      const model = effectiveModel(settings);
+      const canSearch = providerSupportsWebSearch(settings);
+      const webSearch = settings.recommendWebSearch && canSearch;
+      const searchNote = webSearch
+        ? `${model} will search the web as well as drawing on its own knowledge.`
+        : canSearch
+          ? "Web search is off in the plugin settings, so suggestions come from the model's own knowledge only."
+          : "This provider cannot search the web, so suggestions come from the model's own knowledge only.";
+
+      const request = await new RecommendPromptModal(
+        this.app,
+        existingPapers.length,
+        searchNote
+      ).pick();
+      if (!request) return;
+
+      const summaries: CanvasPaperSummary[] = existingPapers.map((p) => ({
+        title: p.title,
+        authors: p.authors || [],
+        year: p.year || null,
+        doi: p.doi,
+        arxiv: p.arxiv,
+      }));
+
+      if (request.includeAbstracts) {
+        await this.attachAbstracts(summaries);
+      }
+
+      const progress = new ProgressNotice(
+        `Asking ${model} for recommendations`,
+        webSearch
+          ? "web search takes a few minutes, please wait"
+          : "this takes a minute, please wait"
+      );
+      let recommendations;
+      let usage;
+      try {
+        const result = await requestRecommendations(
+          {
+            papers: summaries,
+            count: settings.recommendCount,
+            custom: request.prompt || settings.recommendPrompt,
+            webSearch,
+            // Web search plus a long list takes the CLI well past the default.
+            timeoutMs: 600000,
+            onActivity: (activity) => progress.setStatus(activity),
+          },
+          settings
+        );
+        recommendations = result.recommendations;
+        usage = result.response;
+      } finally {
+        progress.hide();
+      }
+
+      if (recommendations.length === 0) {
+        logNotice(
+          wasTruncated(usage?.stopReason)
+            ? "The model's reply was cut off at the output limit, so no recommendations could be read. " +
+              "Raise \"Max output tokens\" under Recommendations, or ask for fewer papers."
+            : "The model returned no usable recommendations. Its reply is in citation-graph.log."
+        );
+        logOnly(
+          "Recommendation reply that could not be parsed:\n" +
+          (usage?.text ?? "").slice(0, 4000)
+        );
+        return;
+      }
+
+      const fresh = recommendations.filter((rec) => !isAlreadyOnCanvas(rec, summaries));
+      const alreadyPresent = recommendations.length - fresh.length;
+
+      if (fresh.length === 0) {
+        logNotice(
+          `All ${recommendations.length} suggestions are already on this canvas.`
+        );
+        return;
+      }
+
+      const checking = "checking each paper exists";
+      const verifyProgress = new ProgressNotice(`Verifying 1/${fresh.length}`, checking);
+      // Surface a backoff wait rather than letting the count appear to stall.
+      this.s2Client.onRateLimitWait = (seconds) => {
+        verifyProgress.setHint(`Semantic Scholar rate limit, retrying in ${seconds}s`);
+      };
+      let verifyResult;
+      try {
+        verifyResult = await verifyRecommendations(
+          fresh,
+          {
+            s2: this.s2Client,
+            openalex: this.openAlexClient,
+            crossref: this.crossRefClient,
+            arxiv: this.arxivClient,
+          },
+          (done, total, title) => {
+            verifyProgress.setStatus(`Verifying ${done}/${total}: ${title.slice(0, 60)}`);
+            verifyProgress.setHint(checking);
+          }
+        );
+      } finally {
+        this.s2Client.onRateLimitWait = null;
+        verifyProgress.hide();
+      }
+
+      const { verified, dropped, unchecked, stoppedReason } = verifyResult;
+
+      const spent =
+        usage && usage.inputTokens + usage.outputTokens > 0
+          ? `${usage.inputTokens} in / ${usage.outputTokens} out tokens`
+          : "";
+      const tally = [
+        `${verified.length} of ${recommendations.length} suggestions verified`,
+        alreadyPresent > 0 ? `${alreadyPresent} already on canvas` : "",
+        dropped.length > 0 ? `${dropped.length} discarded as unverifiable` : "",
+        unchecked.length > 0 ? `${unchecked.length} never checked` : "",
+        spent,
+      ].filter(Boolean);
+      logNotice(`${tally.join(", ")}.`);
+
+      if (stoppedReason) logNotice(stoppedReason);
+
+      for (const drop of dropped) {
+        logOnly(
+          `Discarded recommendation (${drop.reason}): "${drop.recommendation.title}"` +
+          (drop.recommendation.doi ? ` [DOI ${drop.recommendation.doi}]` : "")
+        );
+      }
+
+      if (verified.length === 0) return;
+
+      const bannedPapers = canvasData.citationGraphMeta?.bannedPapers || [];
+      const bannedIds = new Set(bannedPapers.map((b) => b.id));
+
+      const picker = new RecommendPickerModal(
+        this.app,
+        verified,
+        this.canvasPaperIds(existingPapers),
+        bannedIds
+      );
+      const { selected, banned } = await picker.pickPapers();
+
+      if (banned.length > 0) {
+        const existingBannedIds = new Set(bannedPapers.map((b) => b.id));
+        const newBanned = banned
+          .filter((p) => p.paperId && !existingBannedIds.has(p.paperId))
+          .map((p) => ({ id: p.paperId, title: p.title || "Untitled" }));
+        if (!canvasData.citationGraphMeta) {
+          (canvasData as { citationGraphMeta?: Record<string, unknown> }).citationGraphMeta = {};
+        }
+        canvasData.citationGraphMeta!.bannedPapers = [...bannedPapers, ...newBanned];
+        // Persist the ban list even when nothing was added.
+        if (selected.length === 0) {
+          await this.app.vault.modify(canvasFile, JSON.stringify(canvasData, null, 2));
+          logNotice(
+            `No papers selected. ${newBanned.length} papers marked as uninteresting.`
+          );
+          return;
+        }
+      }
+
+      if (selected.length === 0) {
+        logNotice("No papers selected.");
+        return;
+      }
+
+      await this.addRecommendedPapers(canvasFile, canvasData, existingPapers, selected);
+    } catch (e) {
+      console.error("Citation Graph: Error recommending papers", e);
+      logNotice(`Error: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
+  /**
+   * Fill in abstracts for the papers being described to the model. One batch
+   * request covers the whole canvas; papers Semantic Scholar cannot resolve
+   * simply keep their title-only entry.
+   */
+  private async attachAbstracts(summaries: CanvasPaperSummary[]): Promise<void> {
+    const ids = summaries
+      .map((p) => (p.doi ? `DOI:${p.doi}` : p.arxiv ? `ArXiv:${p.arxiv}` : null))
+      .filter((id): id is string => id !== null);
+    if (ids.length === 0) return;
+
+    const notice = new Notice("Fetching abstracts...", 0);
+    try {
+      const papers = await this.s2Client.getPaperBatch(ids);
+      for (const summary of summaries) {
+        const key = summary.doi?.toLowerCase() || summary.arxiv;
+        if (!key) continue;
+        const match = papers.get(key);
+        if (match?.abstract) summary.abstract = match.abstract;
+      }
+    } finally {
+      notice.hide();
+    }
+  }
+
+  /** Create notes for accepted recommendations and place them on the canvas. */
+  private async addRecommendedPapers(
+    canvasFile: TFile,
+    canvasData: CanvasData & { citationGraphMeta?: Record<string, unknown> },
+    existingPapers: Paper[],
+    selected: VerifiedRecommendation[],
+  ): Promise<void> {
+    logNotice(`Adding ${selected.length} papers...`);
+
+    const newPapers = selected.map((v) => s2PaperToPaper(v.resolved.paper));
+
+    const noteFolder =
+      canvasFile.parent?.path || normalizePath(this.settings.collectionsFolder);
+    const noteManager = new LiteratureNoteManager(this.app, noteFolder);
+    await noteManager.createNotes(newPapers);
+
+    // Verification already fetched each paper's references and citations, so
+    // edges cost nothing extra here — including edges among the new papers.
+    const counterparts = [...existingPapers, ...newPapers];
+    const newEdges: CitationEdge[] = [];
+    for (let i = 0; i < selected.length; i++) {
+      newEdges.push(
+        ...this.buildCitationEdges(
+          newPapers[i],
+          selected[i].resolved.references,
+          selected[i].resolved.citations,
+          counterparts
+        )
+      );
+    }
+
+    const updatedCanvas = expandCanvas(
+      canvasData,
+      newPapers,
+      newEdges,
+      this.indexPapers(counterparts),
+      this.settings.nodeWidth,
+      this.settings.nodeHeight
+    );
+
+    await this.syncStatusColors(updatedCanvas.nodes);
+
+    await this.app.vault.modify(
+      canvasFile,
+      JSON.stringify(
+        { ...updatedCanvas, citationGraphMeta: canvasData.citationGraphMeta },
+        null,
+        2
+      )
+    );
+
+    const withoutEdges = newPapers.filter(
+      (p) => !newEdges.some((e) => e.fromId === p.id || e.toId === p.id)
+    ).length;
+    logNotice(
+      `Added ${newPapers.length} papers to canvas` +
+      (withoutEdges > 0 ? ` (${withoutEdges} with no citation link to the canvas).` : ".")
+    );
   }
 
   // ─── Download Papers ────────────────────────────────────
