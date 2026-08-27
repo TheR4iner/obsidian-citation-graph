@@ -2,6 +2,10 @@
 
 An Obsidian plugin that turns a Zotero collection into a **citation graph canvas**: papers as nodes, citations as edges, laid out on a timeline by year. From there you can expand the graph with references and citing works, track what you have read, download PDFs, and have an LLM summarise them, all without leaving your vault.
 
+![A citation graph canvas, zoomed in on six paper nodes. Each node shows the paper's title, authors, year, DOI and arXiv ID, with a coloured border and a status label along its bottom edge. Arrows run between the nodes.](docs/images/canvas-nodes.png)
+
+Six papers on a canvas. Each node is a literature note, its border colour is the reading status, and each arrow runs from a citing paper to the work it cites.
+
 <!-- Demo video and GIF go here. -->
 
 ## Contents
@@ -17,11 +21,16 @@ An Obsidian plugin that turns a Zotero collection into a **citation graph canvas
 - [How it works](#how-it-works)
 - [Limitations](#limitations)
 - [Development](#development)
+- [Contributing](#contributing)
 - [License](#license)
 
 ## What it does
 
 **Build a canvas.** *Create from collection* pulls a Zotero collection; *Create from tag* pulls everything carrying one or more tags (several tags means an intersection, and importer-added tags are hidden unless you ask for them). Papers are resolved through Semantic Scholar, citation edges are drawn between any two papers both present, and each paper gets a literature note with structured frontmatter.
+
+![The same canvas zoomed out to fourteen papers, titles only, with citation edges crossing between them.](docs/images/canvas-overview.png)
+
+Zoomed out, the shape of the literature shows: papers are placed left to right by publication year, and an edge appears wherever one paper on the canvas cites another.
 
 **Grow it.** *Expand paper* finds a paper's references and citing works, filtered by direction, keyword and year, and sorted by citation count. Pick what to add, and notes, nodes and edges appear (with the new papers optionally pushed to Zotero). *Add paper by DOI or arXiv* adds one paper directly; if Semantic Scholar does not know it, the plugin falls back to OpenAlex, arXiv and Crossref so it still lands with whatever metadata exists.
 
@@ -298,6 +307,10 @@ Tests run under [vitest](https://vitest.dev) over the plugin's pure logic: readi
 ### Adding a PDF download source
 
 The download path is written against the `DownloadFallback` interface in `src/api/download-fallback.ts`. A build ships at most one fallback, returned by `getDownloadFallback()` in `src/api/fallback-source.ts`, which returns `null` here. Implement the interface in its own module and return an instance from that function: the picker's row gating, progress reporting and error messages pick it up with no other changes.
+
+## Contributing
+
+Bug reports, feature ideas and pull requests are all welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for how the branches work, what the checks run, and what a change is expected to bring with it.
 
 ## License
 
