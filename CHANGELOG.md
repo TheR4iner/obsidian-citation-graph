@@ -6,6 +6,13 @@ Each released version here is also the body of the matching [GitHub release](htt
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-08-27
+
+### Added
+
+- The README now shows a canvas rather than only describing one: a close-up of six paper nodes, where the metadata, the status colours and the citation edges are all visible, and a wide shot of the same canvas showing the year-ordered layout.
+- A contributing guide, `CONTRIBUTING.md`, covering the branch model, the checks a change has to pass, and what a pull request is expected to bring with it.
+
 ## [0.2.0] - 2026-08-27
 
 ### Added
@@ -46,6 +53,7 @@ First public release.
 - **Sync canvas to Zotero**, **Send papers to canvas**, **Relayout canvas**, **Delete paper**, and **Clear Semantic Scholar cache**.
 - Settings for the collections folder, the Zotero and Semantic Scholar API keys, node size, the five status colours, and the full LLM configuration.
 
-[Unreleased]: https://github.com/TheR4iner/obsidian-citation-graph/compare/0.2.0...HEAD
+[Unreleased]: https://github.com/TheR4iner/obsidian-citation-graph/compare/0.2.1...HEAD
+[0.2.1]: https://github.com/TheR4iner/obsidian-citation-graph/compare/0.2.0...0.2.1
 [0.2.0]: https://github.com/TheR4iner/obsidian-citation-graph/compare/0.1.0...0.2.0
 [0.1.0]: https://github.com/TheR4iner/obsidian-citation-graph/releases/tag/0.1.0
