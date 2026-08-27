@@ -70,7 +70,7 @@ Commands that act on papers take the current canvas selection, and fall back to 
 
 | Setting | Description | Default |
 |---|---|---|
-| **Collections folder** | Root folder for canvases. Each canvas gets a subdirectory holding the canvas and its literature notes | `collections` |
+| **Collections folder** | Root folder for canvases. Each canvas gets a subdirectory holding the canvas and its literature notes. Leave empty to use the vault root | `collections` |
 | **Zotero API key** | Needed only for syncing back to Zotero | |
 | **Zotero user ID** | Numeric ID from the same Zotero keys page | |
 | **Semantic Scholar API key** | Optional, raises the rate limit above the free 100 requests per 5 minutes | |

@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
+import type { Paper } from "../types";
 import {
 	LiteratureNoteManager,
 	bodyHasUserContent,
 	readFrontmatterArxiv,
 	withNoteClass,
 } from "./literature";
-import { makeNote } from "../../test/fakes";
+import { makeNote, makeVault } from "../../test/fakes";
 
 const NOTE_CLASS = "citation-graph-note";
 
@@ -352,5 +353,29 @@ describe("LiteratureNoteManager.displayStatusFor", () => {
 
 	it("leaves 'reading' alone on an empty note", async () => {
 		expect(await displayStatus({ status: "reading" }, scaffold())).toBe("reading");
+	});
+});
+
+describe("createNote folder handling", () => {
+	const paper = () => ({
+		id: "s2:1",
+		title: "Attention Is All You Need",
+		authors: ["A. Vaswani"],
+		year: 2017,
+	}) as unknown as Paper;
+
+	it("writes to the vault root when the folder is empty", async () => {
+		const vault = makeVault({});
+		const path = await new LiteratureNoteManager(vault.app, "/").createNote(paper());
+		expect(path).toBe("Attention Is All You Need.md");
+		// The root always exists; creating it would throw in Obsidian.
+		expect(vault.createdFolders).toEqual([]);
+	});
+
+	it("creates the folder when one is configured", async () => {
+		const vault = makeVault({});
+		const path = await new LiteratureNoteManager(vault.app, "papers/ml").createNote(paper());
+		expect(path).toBe("papers/ml/Attention Is All You Need.md");
+		expect(vault.createdFolders).toEqual(["papers", "papers/ml"]);
 	});
 });
