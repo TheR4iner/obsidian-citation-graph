@@ -29,6 +29,7 @@ import {
   nextStatusInCycle,
   STATUS_LABELS,
 } from "./types";
+import { statusStyleRules } from "./canvas/status-styles";
 import { CitationGraphSettingTab } from "./settings";
 import { ZoteroClient } from "./api/zotero";
 import { SemanticScholarClient } from "./api/semantic-scholar";
@@ -238,16 +239,12 @@ export default class CitationGraphPlugin extends Plugin {
    * Rebuild the stylesheet that turns a canvas node's colour into its status.
    *
    * Status reaches the canvas as `color` in the .canvas file, which Obsidian
-   * exposes on each node as --canvas-color. Reading the status back off that
-   * colour keeps the canvas file the single source of truth. The alternative,
-   * a per-status cssclass in the note's frontmatter, meant the same fact was
+   * turns into a class and a colour on each node. Reading the status back off
+   * that keeps the canvas file the single source of truth. The alternative, a
+   * per-status cssclass in the note's frontmatter, meant the same fact was
    * stored twice and had to be kept in step, and it resolved through
    * Obsidian's file lookup -- which silently picks the wrong note when two
    * filenames differ only in case.
-   *
-   * Generated at runtime because the colours are user-configurable. Style
-   * queries match on computed value, so this does not care how Obsidian
-   * formats the inline style it sets the colour with.
    */
   applyStatusStyles(): void {
     if (!this.statusStyleEl) {
@@ -255,35 +252,7 @@ export default class CitationGraphPlugin extends Plugin {
       this.statusStyleEl.id = "citation-graph-status-colors";
       document.head.appendChild(this.statusStyleEl);
     }
-
-    const PAPER = ".canvas-node:has(.citation-graph-note)";
-    const rules: string[] = [];
-
-    for (const status of ["reading", "read", "annotated", "abandoned"] as const) {
-      const colour = statusColor(this.settings, status);
-      if (!colour) continue; // shares the uncoloured default; the base rule labels it
-      // A thicker frame than the 3px baseline, so a paper you have actually
-      // engaged with reads as distinct from an untouched one even before the
-      // colour registers. "To read" keeps the baseline: it has no configured
-      // colour, so it never reaches this loop.
-      const extra =
-        `\n      border-width: 5px !important;` +
-        (status === "abandoned"
-          ? `\n      border-style: dashed !important;\n      opacity: 0.55;`
-          : "");
-      rules.push(
-        `@container style(--canvas-color: ${colour}) {\n` +
-          `  ${PAPER} .canvas-node-container {\n` +
-          `      --cg-status-label: "${STATUS_LABELS[status]}";${extra}\n` +
-          `  }\n` +
-          (status === "abandoned"
-            ? `  ${PAPER}:hover .canvas-node-container { opacity: 1; }\n`
-            : "") +
-          `}`
-      );
-    }
-
-    this.statusStyleEl.textContent = rules.join("\n\n");
+    this.statusStyleEl.textContent = statusStyleRules(this.settings);
   }
 
   // ─── Create from Collection ─────────────────────────────────

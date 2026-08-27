@@ -16,13 +16,14 @@
  * nested inside it. The wash must therefore be cleared separately, or it
  * paints straight over the container beneath.
  *
- * The colour comes from --canvas-color, which Obsidian sets per node from the
- * .canvas file's `color` field as a complete colour value (e.g. "#d9a83a").
- * It is read through a registered custom property because an uncoloured
- * ("to read") node leaves --canvas-color empty: a plain var() substitution
- * would then be invalid at computed-value time, and an invalid border-color
- * falls back to currentColor, painting those nodes in the note's text colour.
- * A registered property falls back to its initial-value instead.
+ * The colour comes from --canvas-color, which Obsidian resolves per node to a
+ * complete colour value: a preset via the .mod-canvas-color-<n> class, a
+ * custom colour via an inline hex, and an uncoloured node via the grey set on
+ * body. It is read through a registered custom property as a guard: should
+ * --canvas-color ever be unset, a plain var() substitution would be invalid
+ * at computed-value time, and an invalid border-color falls back to
+ * currentColor, painting those nodes in the note's text colour. A registered
+ * property falls back to its initial-value instead.
  *
  * It inherits so that ::after, which draws the label, picks up the same
  * colour; a non-inheriting property would hand the pseudo-element the
@@ -98,8 +99,8 @@
   pointer-events: none;
 }
 
-/* Every paper starts as "to read". Papers whose colour matches a configured
-   status are relabelled by the runtime stylesheet the plugin injects (see
+/* Every paper starts as "to read". Papers carrying a configured status colour
+   are relabelled by the runtime stylesheet the plugin injects (see
    applyStatusStyles in main.ts), which also dashes and dims abandoned ones.
    Those rules are generated because the colours are user-configurable. */
 .canvas-node:has(.citation-graph-note) .canvas-node-container {
