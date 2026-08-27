@@ -11,6 +11,11 @@ export class OpenAlexClient {
 
   constructor(private email: string = "") {}
 
+  /** Adopt a contact email entered after the client was created. */
+  setEmail(email: string): void {
+    this.email = email;
+  }
+
   private buildUrl(path: string, params: Record<string, string> = {}): string {
     if (this.email) params["mailto"] = this.email;
     const qs = new URLSearchParams(params).toString();

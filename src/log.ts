@@ -39,6 +39,14 @@ function appendToLog(message: string): void {
 }
 
 /**
+ * Write to the log file without showing a notice. For detail a user only wants
+ * when something looks wrong: raw model replies, per-item rejection reasons.
+ */
+export function logOnly(message: string): void {
+  appendToLog(message);
+}
+
+/**
  * Drop-in replacement for `new Notice(...)` that also writes to the log file.
  * Returns the Notice instance so callers can chain if needed.
  */

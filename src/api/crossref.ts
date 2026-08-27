@@ -11,6 +11,11 @@ export class CrossRefClient {
 
   constructor(private email: string = "") {}
 
+  /** Adopt a contact email entered after the client was created. */
+  setEmail(email: string): void {
+    this.email = email;
+  }
+
   private async rateLimitedRequest<T>(fn: () => Promise<T>): Promise<T> {
     const now = Date.now();
     const elapsed = now - this.lastRequestTime;

@@ -54,3 +54,12 @@ export class Modal {
 export class ButtonComponent {
 	constructor(public containerEl: unknown) {}
 }
+
+/**
+ * The tested modules import this for their HTTP calls but no test drives a
+ * network path: anything reaching here is a test that should have been written
+ * against a fake client instead.
+ */
+export const requestUrl = (): never => {
+	throw new Error("requestUrl is not available under the obsidian test stub");
+};
