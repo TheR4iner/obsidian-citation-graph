@@ -7,10 +7,10 @@ import type { Paper, CitationGraphSettings, LlmResponse } from "../types";
 
 /** Default models per provider (used when settings.llmModel is empty) */
 const DEFAULT_MODELS: Record<string, string> = {
-	anthropic: "claude-sonnet-4-6",
+	anthropic: "claude-sonnet-5",
 	openai: "gpt-4o",
 	google: "gemini-2.5-flash",
-	"claude-cli": "claude-sonnet-4-6",
+	"claude-cli": "claude-sonnet-5",
 };
 
 /**

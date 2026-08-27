@@ -83,7 +83,7 @@ Commands that act on papers take the current canvas selection, and fall back to 
 | **LLM provider** | Anthropic API, OpenAI API, Google Gemini API, or the local Claude CLI | Claude CLI |
 | **Claude CLI path** | Claude CLI only. Blank auto-detects `~/.local/bin/claude`, then `claude` on Obsidian's PATH | |
 | **API key** | For the selected LLM provider; not needed for Claude CLI | |
-| **Model** | Overrides the provider default (`claude-sonnet-4-6`, `gpt-4o`, `gemini-2.5-flash`) | |
+| **Model** | Overrides the provider default (`claude-sonnet-5`, `gpt-4o`, `gemini-2.5-flash`) | |
 | **Max output tokens** | Cap per summary, controlling length and cost | 1024 |
 | **Batch token budget** | Stops a batch once this many tokens are spent; 0 is unlimited. Not tracked for Claude CLI | 0 |
 | **Summary prompt** | Replaces the built-in prompt. Supports `{title}`, `{authors}`, `{year}`; the PDF is attached automatically | |
