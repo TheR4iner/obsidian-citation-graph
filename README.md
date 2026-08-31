@@ -32,7 +32,7 @@ Six papers on a canvas. Each node is a literature note, its border colour is the
 
 Zoomed out, the shape of the literature shows: papers are placed left to right by publication year, and an edge appears wherever one paper on the canvas cites another.
 
-**Grow it.** *Expand paper* finds a paper's references and citing works, filtered by direction, keyword and year, and sorted by citation count. Pick what to add, and notes, nodes and edges appear (with the new papers optionally pushed to Zotero). *Add paper by DOI or arXiv* adds one paper directly; if Semantic Scholar does not know it, the plugin falls back to OpenAlex, arXiv and Crossref so it still lands with whatever metadata exists.
+**Grow it.** *Expand paper* finds a paper's references and citing works, filtered by direction, keyword and year, and sorted by citation count. Pick what to add, and notes, nodes and edges appear (with the new papers optionally pushed to Zotero). The same run also links the expanded paper to papers already on the canvas that cite it or that it cites. *Resolve missing citation edges* does that for the whole canvas at once: it re-checks every paper and draws every edge the canvas does not yet have, without moving a single node. *Add paper by DOI or arXiv* adds one paper directly; if Semantic Scholar does not know it, the plugin falls back to OpenAlex, arXiv and Crossref so it still lands with whatever metadata exists.
 
 **Prune it.** Any paper you are offered can be marked uninteresting instead of added, and it is then never offered on that canvas again.
 
@@ -65,7 +65,8 @@ Not yet in the community marketplace, so install by hand:
 1. Start Zotero and confirm the local API is enabled (see [Requirements](#requirements)).
 2. In Obsidian, run **Citation Graph: Canvas: create from collection** from the command palette and pick a collection. The plugin resolves each paper, writes a literature note, and opens a canvas under `collections/<collection name>/`.
 3. Select a node and run **Expand paper** to pull in its references and citing works. Tick what you want; press *Add selected & ban rest* to discard the remainder for good.
-4. Select a node and press your hotkey for **Cycle reading status** to move it through *to read*, *reading*, *read*. The node's border colour changes to match.
+4. After a few expansions, run **Canvas: resolve missing citation edges** to draw any arrows the canvas is still missing between papers it already holds.
+5. Select a node and press your hotkey for **Cycle reading status** to move it through *to read*, *reading*, *read*. The node's border colour changes to match.
 
 A first run over a large collection takes a few minutes, and a [Semantic Scholar API key](#rate-limits) removes most of that wait.
 
@@ -73,13 +74,14 @@ A first run over a large collection takes a few minutes, and a [Semantic Scholar
 
 All are in the command palette under `Citation Graph:`, grouped by a second prefix so that typing the group narrows the list: **Canvas**, **Papers**, **Reading**, **PDFs**, **Maintenance**. The rest of this page refers to each command by its short name.
 
-Only three of them work without a canvas open: *Create from collection*, *Create from tag* and *Clear Semantic Scholar cache*. The other thirteen are hidden from the palette until a canvas is open, so the list stays short while you are reading a note.
+Only three of them work without a canvas open: *Create from collection*, *Create from tag* and *Clear Semantic Scholar cache*. The other fifteen are hidden from the palette until a canvas is open, so the list stays short while you are reading a note.
 
 | Command | What it does |
 |---|---|
 | **Canvas: create from collection** | Builds a canvas from a Zotero collection, into `<collections folder>/<collection name>/` |
 | **Canvas: create from tag** | Builds a canvas from an intersection of Zotero tags, into a folder named after the tags |
 | **Canvas: relayout** | Re-sorts nodes chronologically, discarding manual positions |
+| **Canvas: resolve missing citation edges** | Re-checks every paper on the canvas and draws the edges it is missing; **(force refresh)** bypasses the local cache |
 | **Canvas: sync to Zotero** | Pushes the canvas's papers back to a Zotero collection |
 | **Canvas: send papers to another canvas** | Copies or moves papers, with their edges, to another canvas |
 | **Papers: expand paper** | Adds a paper's references and citing works; **(force refresh)** bypasses the local cache |
@@ -144,13 +146,23 @@ The list lives in the canvas file, so it travels with the canvas. Review it, or 
 
 **A recommendation run takes minutes, and says so while it works.** The notice carries a running clock, so a long wait is visibly a wait rather than a hang. With the Claude CLI it also names what the model is doing as it happens, reading its event stream: thinking, searching the web for a given query, or writing the answer. The API providers are reached through Obsidian's `requestUrl`, which returns a response whole and cannot stream, so there the clock is all there is.
 
+### Resolving citation edges
+
+**Resolve missing citation edges** walks every paper on the canvas, asks the citation sources for its references and citing works, and draws each edge whose two endpoints are both already on the canvas. Nodes are never moved: only the edge list is rewritten, so hand-placed positions survive. It is the canvas-wide version of what *Expand paper* does for one paper, and the way to fill in edges a canvas is missing, because *Expand paper* cannot reach a pair of papers that arrived by separate routes: it lists an already-present paper with its row disabled.
+
+Reach for it after a stretch of adding papers one at a time, after *Send papers to canvas*, or when two papers you know are connected sit side by side with no arrow between them. It is safe to re-run: an edge already drawn is left alone.
+
+Cached reference data is reused, so a second run over the same canvas is nearly instant. **(force refresh)** ignores the cache and re-queries every paper, which is what to use when the cached answer looks wrong or predates a paper you expect to be cited by. A full refresh is one round of requests per paper, so on a large canvas it is slow without a Semantic Scholar API key. See [Rate limits](#rate-limits).
+
+The closing notice reports how many edges were added, how many papers came from the cache, how many returned no citation data at all, and how many carry no DOI, arXiv ID or Semantic Scholar ID to look up. The titles behind the last two counts go to `citation-graph.log`.
+
 ### Rate limits
 
 **Semantic Scholar rate limits are retried, not swallowed.** Verification is one request per suggestion against a service that allows roughly 100 every 5 minutes without an API key, so ten suggestions take about half a minute and can be throttled anyway. A refused request is retried after 5, 15 and 45 seconds, and the notice says so while it waits. If it is still refused, verification stops and reports the remaining suggestions as *never checked* rather than discarding them as nonexistent. An API key raises the ceiling and cuts the spacing between requests from 3 seconds to 1, and takes effect as soon as you enter it.
 
 ### Send papers to canvas
 
-**Send papers to canvas** carries an edge over whenever both its endpoints exist on the target. It does not go looking for new ones: run *Expand paper* on the target for that.
+**Send papers to canvas** carries an edge over whenever both its endpoints exist on the target. It does not go looking for new ones: run *Resolve missing citation edges* on the target for that.
 
 ## Settings
 
@@ -281,6 +293,7 @@ The **Zotero local API** on `localhost:23119` reads collections and items, needi
 
 - Papers with neither a DOI nor an arXiv ID cannot be resolved, and are skipped.
 - Citation edges are drawn only between papers both present on the canvas.
+- *Expand paper* and *Add paper by DOI or arXiv* resolve only the edges incident to the paper they act on. An edge between two *other* papers on the canvas needs *Resolve missing citation edges*. See [Resolving citation edges](#resolving-citation-edges).
 - A first run over a large collection takes minutes without a Semantic Scholar API key. See [Rate limits](#rate-limits).
 - Only arXiv is configured as a PDF source, so *Download* and *Write summary* cannot reach a paper that has no arXiv version. See [Download](#download).
 - *Recommend papers* drops any suggestion no citation source can identify, so a genuinely obscure paper the model knows about may still be lost.
