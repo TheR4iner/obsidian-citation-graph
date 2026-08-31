@@ -6,6 +6,16 @@ Each released version here is also the body of the matching [GitHub release](htt
 
 ## [Unreleased]
 
+### Added
+
+- **Canvas: resolve missing citation edges**: re-checks every paper on the canvas against the citation sources and draws each edge whose two endpoints are both already present. Nodes are never moved, so hand-placed positions survive, and an edge already drawn is left alone, so the command is safe to re-run. It is the way to fill in arrows a canvas is missing between papers that arrived by separate routes, which *Expand paper* cannot do: it lists an already-present paper with its row disabled. **(force refresh)** re-queries every paper instead of reusing cached reference data. The closing notice reports edges added, papers served from the cache, papers no source had citation data for, and papers carrying no identifier to look up; the titles behind the last two go to `citation-graph.log`.
+
+### Fixed
+
+- *Expand paper* now draws the citation edge for a paper whose metadata came from OpenAlex, arXiv or Crossref rather than Semantic Scholar. Such a paper was added to the canvas as a node and a note, but its arrow to the expanded paper was dropped without a word, so the two sat side by side unconnected.
+- *Expand paper* now also connects the expanded paper to papers already on the canvas that cite it or that it cites. Previously an expansion only drew edges to the papers it added in that run, so a reference that arrived on an earlier run stayed unlinked with no way to link it: the picker lists it as already present and will not let you tick it again. Re-running *Expand paper* on a node now fills in its missing arrows.
+- A citation edge that cannot be matched to a node is recorded in `citation-graph.log` with both of its endpoints instead of vanishing silently.
+
 ## [0.2.1] - 2026-08-27
 
 ### Added

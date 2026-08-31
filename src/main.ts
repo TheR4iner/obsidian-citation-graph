@@ -56,7 +56,7 @@ import {
 import type { BannedPaper } from "./types";
 import { LiteratureNoteManager, readFrontmatterArxiv } from "./notes/literature";
 import { hasSummarySection, insertSummaryText } from "./notes/summary-text";
-import { buildCanvas, expandCanvas } from "./canvas/builder";
+import { buildCanvas, expandCanvas, resolveNewEdges } from "./canvas/builder";
 import { registerCanvasPaperMenu } from "./canvas/node-menu";
 import { hasPaperNode, resolvePaperNodeId, layoutPapers, layoutNewPapers } from "./canvas/layout";
 import { S2RefCache } from "./api/s2-cache";
@@ -153,6 +153,20 @@ export default class CitationGraphPlugin extends Plugin {
       id: "relayout-canvas",
       name: "Canvas: relayout",
       checkCallback: this.canvasCommand(() => this.relayoutCanvas()),
+    });
+
+    this.addCommand({
+      id: "resolve-missing-edges",
+      name: "Canvas: resolve missing citation edges",
+      checkCallback: this.canvasCommand(() => this.resolveMissingEdges()),
+    });
+
+    this.addCommand({
+      id: "resolve-missing-edges-refresh",
+      name: "Canvas: resolve missing citation edges (force refresh)",
+      checkCallback: this.canvasCommand(() =>
+        this.resolveMissingEdges({ forceRefresh: true })
+      ),
     });
 
     this.addCommand({
@@ -801,27 +815,44 @@ export default class CitationGraphPlugin extends Plugin {
       );
       await noteManager.createNotes(newPapers);
 
-      // 10. Build edges between the expanded paper and selected papers
-      const newEdges: CitationEdge[] = [];
-      const expandedS2Id = s2Id || doi || externalId;
+      // 10. Build edges between the expanded paper and the canvas.
+      // Both endpoints must name a paper by the id `indexPapers` keys on, which
+      // is the paper's own id, never the raw S2 paperId: the fallback sources
+      // hand back synthetic ids ("doi:…", "openalex:…") that `s2PaperToPaper`
+      // deliberately drops, so an edge naming one resolves to no node and is
+      // silently discarded.
+      const expandedPaper = canvasPapers.find(
+        (p) => p.notePath === targetNotePath
+      );
+      const expandedId: string =
+        expandedPaper?.id || s2Id || doi || externalId;
 
-      for (const s2p of selected) {
-        // Check if this is a reference (expanded paper cites it) or citation (it cites expanded paper)
-        const isReference = references.some(
-          (r) => r.paperId === s2p.paperId
+      const referenceIds = new Set(references.map((r) => r.paperId));
+      const newEdges: CitationEdge[] = selected.map((s2p, i) =>
+        referenceIds.has(s2p.paperId)
+          ? // Expanded paper → selected paper (expanded cites selected)
+            { fromId: expandedId, toId: newPapers[i].id }
+          : // Selected paper → expanded paper (selected cites expanded)
+            { fromId: newPapers[i].id, toId: expandedId }
+      );
+
+      // Papers already on the canvas need their edge drawn here too. Without
+      // this an expansion only ever links the papers it just added, so a
+      // reference that landed on the canvas on an earlier run stays unlinked
+      // with no way to link it: the picker disables its row as already present.
+      if (expandedPaper) {
+        newEdges.push(
+          ...this.buildCitationEdges(
+            expandedPaper,
+            references,
+            citations,
+            canvasPapers
+          )
         );
-        if (isReference) {
-          // Expanded paper → selected paper (expanded cites selected)
-          newEdges.push({ fromId: expandedS2Id, toId: s2p.paperId });
-        } else {
-          // Selected paper → expanded paper (selected cites expanded)
-          newEdges.push({ fromId: s2p.paperId, toId: expandedS2Id });
-        }
       }
 
-      // Also look for edges between new papers and other existing papers
-      // (we'd need to query S2 for each new paper's refs, but that's expensive)
-      // For now, just add direct edges to the expanded paper
+      // Edges between two *other* papers on the canvas are not resolved here:
+      // that would mean querying each one's references separately.
 
       // 11. Build all-papers map for canvas expansion
       const allPapers = this.indexPapers([...canvasPapers, ...newPapers]);
@@ -1094,6 +1125,150 @@ export default class CitationGraphPlugin extends Plugin {
     }
 
     return edges;
+  }
+
+  /**
+   * Re-resolve every paper on the canvas against the citation sources and draw
+   * the edges the canvas is missing.
+   *
+   * Expanding papers one at a time does not add up to this. An expansion only
+   * resolves edges incident to the paper being expanded, and it cannot bring in
+   * a paper that is already present: the picker lists such a row disabled, so a
+   * pair that arrived on the canvas by two separate routes has no way to get
+   * its arrow. This walks every paper instead and asks for the whole set.
+   *
+   * Nodes are never touched. Only `edges` is rewritten, so hand-placed
+   * positions survive; moving nodes is *Canvas: relayout*'s job and it asks
+   * first.
+   */
+  private async resolveMissingEdges(opts?: { forceRefresh?: boolean }): Promise<void> {
+    const progress = new ProgressNotice("Resolving citation edges");
+    try {
+      const activeFile = this.findActiveCanvas();
+      if (!activeFile) {
+        logNotice("Open a citation graph canvas first, then run this command.");
+        return;
+      }
+
+      const canvasData = JSON.parse(
+        await this.app.vault.read(activeFile)
+      ) as CanvasData;
+
+      const papers = this.canvasPapers(canvasData);
+      if (papers.length < 2) {
+        logNotice(
+          "This canvas has fewer than two papers, so there are no edges to resolve."
+        );
+        return;
+      }
+
+      const citationEdges: CitationEdge[] = [];
+      const unidentified: string[] = [];
+      const unresolved: string[] = [];
+      let fetched = 0;
+      let fromCache = 0;
+
+      for (let i = 0; i < papers.length; i++) {
+        const paper = papers[i];
+        progress.setStatus(
+          `Resolving citation edges: paper ${i + 1} of ${papers.length}`
+        );
+        progress.setHint(paper.title || paper.id);
+
+        // fetchRefsAndCitations derives its own query IDs; this key is only for
+        // the cache, which indexes DOI, arXiv and S2 forms alike.
+        const cacheKey = paper.doi
+          ? `DOI:${paper.doi}`
+          : paper.arxiv
+            ? `ARXIV:${paper.arxiv}`
+            : paper.semanticScholarId;
+        if (!cacheKey) {
+          unidentified.push(paper.title || paper.notePath || paper.id);
+          continue;
+        }
+
+        const cached = opts?.forceRefresh ? null : this.s2Cache.get(cacheKey);
+        let references: S2Paper[];
+        let citations: S2Paper[];
+
+        if (cached) {
+          references = cached.references;
+          citations = cached.citations;
+          fromCache++;
+        } else {
+          const result = await fetchRefsAndCitations(
+            paper.doi, paper.arxiv, paper.semanticScholarId, this.settings,
+            { s2: this.s2Client, openalex: this.openAlexClient, crossref: this.crossRefClient },
+          );
+          if (!result) {
+            // Every source came back empty. Usually the paper is too new or too
+            // obscure to be indexed, but an exhausted Semantic Scholar rate
+            // limit looks the same from here, which is why the count is
+            // reported rather than passed over.
+            unresolved.push(paper.title || paper.id);
+            continue;
+          }
+          references = result.references;
+          citations = result.citations;
+          this.s2Cache.setMerged(
+            cacheKey, paper.doi, paper.arxiv,
+            references, citations, result.sources,
+          );
+          fetched++;
+        }
+
+        citationEdges.push(
+          ...this.buildCitationEdges(paper, references, citations, papers)
+        );
+      }
+
+      if (fetched > 0) await this.s2Cache.save();
+
+      const addedEdges = resolveNewEdges(
+        canvasData.edges,
+        new Set(canvasData.nodes.map((n) => n.id)),
+        citationEdges,
+        this.indexPapers(papers)
+      );
+
+      if (addedEdges.length > 0) {
+        await this.app.vault.modify(
+          activeFile,
+          JSON.stringify(
+            { ...canvasData, edges: [...canvasData.edges, ...addedEdges] },
+            null,
+            2
+          )
+        );
+      }
+
+      progress.hide();
+
+      const detail = [
+        `${papers.length} papers checked`,
+        `${fromCache} from cache`,
+      ];
+      if (unresolved.length > 0) {
+        detail.push(`${unresolved.length} with no citation data`);
+        logOnly(`No citation data resolved for: ${unresolved.join("; ")}`);
+      }
+      if (unidentified.length > 0) {
+        detail.push(`${unidentified.length} without an identifier`);
+        logOnly(
+          `No DOI, arXiv ID or Semantic Scholar ID for: ${unidentified.join("; ")}`
+        );
+      }
+      logNotice(
+        addedEdges.length === 0
+          ? `No missing citation edges found (${detail.join(", ")}).`
+          : `Added ${addedEdges.length} citation edge${addedEdges.length === 1 ? "" : "s"} (${detail.join(", ")}).`
+      );
+    } catch (e) {
+      console.error("Citation Graph: Error resolving missing edges", e);
+      logNotice(`Error: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      progress.hide();
+    }
   }
 
   /**
