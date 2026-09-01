@@ -6,6 +6,11 @@ Each released version here is also the body of the matching [GitHub release](htt
 
 ## [Unreleased]
 
+### Fixed
+
+- Cycling the reading status of a paper that has a summary or notes in it now works. Such a paper was labelled *Read + notes written* whatever its actual status, so cycling it appeared to do nothing, or to flip between two labels at random. Two separate causes: *Read + notes written* was derived from the note's content alone, which meant the plugin's own *Write summary* silently marked papers as read; and the cycle read the current status from Obsidian's metadata cache, which lags behind writes, so a second press could decide from the status before the first press.
+- *Read + notes written* now means both halves: a paper reaches it when it is marked *Read* **and** its note has content of its own. A paper you have never opened is no longer labelled as read because something was written into its note.
+
 ### Changed
 
 - Reading status is now drawn entirely from the plugin's stylesheet, so a theme or a CSS snippet can restyle any status without the plugin's help. Nothing looks different: the same labels, the same thicker frame on a paper you have started, the same dashed and faded treatment for an abandoned one. The status reaches the canvas as a `citation-graph-status-*` class on the literature note instead of being inferred from the node's colour, which has two visible consequences. Two statuses sharing a colour now read differently, by their labels, where before they were indistinguishable. And a status you left on *No colour* is now labelled correctly, where before it fell back to "To read".

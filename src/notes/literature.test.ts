@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { Paper } from "../types";
+import type { Paper, PaperStatus } from "../types";
+import { nextStatusInCycle } from "../types";
 import {
 	LiteratureNoteManager,
 	bodyHasUserContent,
@@ -316,6 +317,63 @@ describe("LiteratureNoteManager.setStatus", () => {
 	});
 });
 
+describe("LiteratureNoteManager.updateStatus", () => {
+	it("hands the callback the stored status and writes its answer", async () => {
+		const note = makeNote({ fm: { doi: "10.1000/xyz", status: "reading" } });
+		const seen: PaperStatus[] = [];
+
+		const written = await new LiteratureNoteManager(note.app, "papers").updateStatus(
+			note.file,
+			(current) => {
+				seen.push(current);
+				return nextStatusInCycle(current);
+			},
+		);
+
+		expect(seen).toEqual(["reading"]);
+		expect(written).toBe("read");
+		expect(note.fm()?.status).toBe("read");
+	});
+
+	it("reads a note with no status at all as unread", async () => {
+		const note = makeNote({ fm: { doi: "10.1000/xyz" } });
+		const seen: PaperStatus[] = [];
+		await new LiteratureNoteManager(note.app, "papers").updateStatus(note.file, (c) => {
+			seen.push(c);
+			return c;
+		});
+		expect(seen).toEqual(["unread"]);
+	});
+
+	it("reads the legacy 'read: true' field as read", async () => {
+		const note = makeNote({ fm: { doi: "10.1000/xyz", read: true } });
+		const seen: PaperStatus[] = [];
+		await new LiteratureNoteManager(note.app, "papers").updateStatus(note.file, (c) => {
+			seen.push(c);
+			return c;
+		});
+		expect(seen).toEqual(["read"]);
+		expect(note.fm()).not.toHaveProperty("read");
+	});
+
+	// The regression this exists for: the cycle command used to read the current
+	// status from metadataCache, which Obsidian had not refreshed yet, so a
+	// second press decided from the status before the first press and the paper
+	// never advanced past the same two values.
+	it("advances every time, even while the metadata cache lags behind", async () => {
+		const note = makeNote({ fm: { doi: "10.1000/xyz", status: "unread" } });
+		const manager = new LiteratureNoteManager(note.app, "papers");
+		note.freezeCache();
+
+		const seen: PaperStatus[] = [];
+		for (let press = 0; press < 3; press++) {
+			seen.push(await manager.updateStatus(note.file, nextStatusInCycle));
+		}
+
+		expect(seen).toEqual(["reading", "read", "unread"]);
+	});
+});
+
 describe("LiteratureNoteManager.syncNoteClass", () => {
 	it("is a no-op when the note already carries the right classes", async () => {
 		const note = makeNote({
@@ -407,8 +465,16 @@ describe("LiteratureNoteManager.displayStatusFor", () => {
 		expect(await displayStatus({ status: "read" }, scaffold({ notes: "good" }))).toBe("annotated");
 	});
 
-	it("derives 'annotated' from an unread note carrying notes", async () => {
-		expect(await displayStatus({ status: "unread" }, scaffold({ notes: "good" }))).toBe("annotated");
+	// "Read + notes written" has to mean both. Deriving it from the body alone
+	// labelled papers that had never been opened, because the plugin's own
+	// Write summary puts content in the note, and it froze the reading list:
+	// cycling a summarised paper never changed what the canvas showed.
+	it("leaves an unread note carrying notes unread", async () => {
+		expect(await displayStatus({ status: "unread" }, scaffold({ notes: "good" }))).toBe("unread");
+	});
+
+	it("leaves a reading note carrying notes on 'reading'", async () => {
+		expect(await displayStatus({ status: "reading" }, scaffold({ notes: "good" }))).toBe("reading");
 	});
 
 	it("keeps an abandoned note abandoned even when it carries notes", async () => {

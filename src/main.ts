@@ -2152,8 +2152,10 @@ export default class CitationGraphPlugin extends Plugin {
         continue;
       }
 
-      const written = nextStatus(noteManager.getStatus(noteFile));
-      await noteManager.setStatus(noteFile, written);
+      // Decided and written in one pass over the file: reading the current
+      // status back out of the metadata cache would see the value from before
+      // the previous run of this command, and the cycle would not advance.
+      const written = await noteManager.updateStatus(noteFile, nextStatus);
       updated++;
 
       const display: DisplayStatus = await noteManager.displayStatusFor(noteFile, written);

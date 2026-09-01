@@ -403,13 +403,21 @@ ${paper.arxiv ? `**arXiv**: [${escapeNoteText(paper.arxiv)}](https://arxiv.org/a
 
   /**
    * Derive the display status from a status the caller already knows.
+   *
+   * "Read + notes written" means exactly that, so only a paper marked *read*
+   * can reach it. Deriving it from the note body alone made the label lie
+   * about papers that had never been opened, since the plugin's own *Write
+   * summary* puts content in the note, and it froze the reading list: every
+   * summarised paper showed the same status whatever it was set to, so
+   * cycling one appeared to do nothing.
+   *
    * Callers that have just written a status must use this rather than
    * getDisplayStatus: Obsidian refreshes the metadata cache asynchronously
    * after processFrontMatter, so re-reading it here would see the old value
    * and paint the wrong color.
    */
   async displayStatusFor(file: TFile, status: PaperStatus): Promise<DisplayStatus> {
-    if (status === "abandoned") return status;
+    if (status !== "read") return status;
     return (await this.hasUserNotes(file)) ? "annotated" : status;
   }
 
@@ -418,14 +426,37 @@ ${paper.arxiv ? `**arXiv**: [${escapeNoteText(paper.arxiv)}](https://arxiv.org/a
    * ever one source of truth, and keeping the abandoned cssclass in step.
    */
   async setStatus(file: TFile, status: PaperStatus): Promise<void> {
+    await this.updateStatus(file, () => status);
+  }
+
+  /**
+   * Choose a note's next status from the one it actually holds, and write it.
+   *
+   * `next` is handed the status read out of the file inside the same
+   * `processFrontMatter` call that writes the answer, so the two cannot be
+   * separated. Deciding from `getStatus` instead would read `metadataCache`,
+   * which Obsidian refreshes asynchronously: two quick presses of the cycle
+   * command would both see the status from before the first press, and the
+   * second would rewrite what the first had already written.
+   *
+   * The class written here carries the *stored* status. "annotated" is
+   * derived from the note body, which this synchronous callback cannot read,
+   * so a caller that needs the distinction follows up with `syncNoteClass`.
+   */
+  async updateStatus(
+    file: TFile,
+    next: (current: PaperStatus) => PaperStatus
+  ): Promise<PaperStatus> {
+    let written: PaperStatus = "unread";
     await this.app.fileManager.processFrontMatter(file, (fm) => {
-      fm.status = status;
+      const stored =
+        parsePaperStatus(fm.status) ?? (fm.read === true ? "read" : "unread");
+      written = next(stored);
+      fm.status = written;
       if ("read" in fm) delete fm.read;
-      // The stored status, not the displayed one: "annotated" is derived from
-      // the note body, which cannot be read from inside this callback. A
-      // caller that needs the distinction follows up with syncNoteClass.
-      fm.cssclasses = withNoteClass(fm.cssclasses, status);
+      fm.cssclasses = withNoteClass(fm.cssclasses, written);
     });
+    return written;
   }
 
   /**

@@ -143,11 +143,11 @@ Right-clicking a paper node offers the per-paper commands directly: *Expand pape
 </tr>
 </table>
 
-The same paper in four of the five states, at the default colours. The fifth, *Read + notes written*, is green and appears as soon as the note has content of its own.
+The same paper in four of the five states, at the default colours. The fifth, *Read + notes written*, is green and appears once a paper marked *Read* has content of its own in the note.
 
 **Status lives in the note**, in a `status` frontmatter field, so it follows a paper across every canvas it appears on and is queryable from Dataview. Notes predating this feature carry `read: true` and are treated as *read* until their status is next set.
 
-**"Read with notes written" is derived, not stored.** As soon as a note contains anything beyond the generated template, whether your own prose, an added heading, a checklist, or a summary from *Write summary*, the paper is painted as annotated. It is therefore absent from the status picker, and it is why *Refresh reading status* exists: writing notes changes a paper's appearance with no command involved. Abandoned papers are the exception and stay abandoned, since notes on them usually record why you dropped the paper.
+**"Read + notes written" is derived, not stored.** A paper reaches it when it is marked *Read* **and** its note contains anything beyond the generated template: your own prose, an added heading, a checklist, or a summary from *Write summary*. Both halves are required, so a paper you have not read yet is never labelled as read, however much has been written into its note. It is absent from the status picker for the same reason it exists at all, and it is why *Refresh reading status* exists: writing notes into a paper you have already read changes its appearance with no command involved.
 
 ### Reading an abstract in the picker
 
@@ -245,7 +245,7 @@ Queried alongside Semantic Scholar so a paper it does not know, or references it
 | **To read** | Node colour for papers not started | No colour |
 | **Reading** | Node colour for papers in progress | Yellow |
 | **Read** | Node colour for papers finished but not written up | Cyan |
-| **Read + notes written** | Node colour applied automatically once the note has content of its own | Green |
+| **Read + notes written** | Node colour applied automatically to a paper marked *Read* whose note has content of its own | Green |
 | **Abandoned** | Node colour for papers you decided not to finish; also dimmed with a dashed border | Red |
 
 See [How status colours are drawn](#how-status-colours-are-drawn) below.
@@ -315,7 +315,7 @@ cssclasses:
 
 The body carries a title heading, an author/year/DOI/arXiv block, a `## Summary` section written by *Write summary*, and a `## Notes` section for you.
 
-`status` holds one of `unread`, `reading`, `read` or `abandoned`, which the interface labels *To read*, *Reading*, *Read* and *Abandoned*. *Read + notes written* has no stored value: it is derived from the note's body.
+`status` holds one of `unread`, `reading`, `read` or `abandoned`, which the interface labels *To read*, *Reading*, *Read* and *Abandoned*. *Read + notes written* has no stored value: it is derived, from `read` plus content in the note's body.
 
 `cssclasses` carries `citation-graph-note`, which marks the note as a paper, and one `citation-graph-status-*` class the canvas styling reads. Both are rewritten whenever the plugin paints a canvas, so edit `status` rather than the class; any classes of your own are left where they are.
 

@@ -7,7 +7,7 @@ A paper's reading status is stored as `status:` in its literature note frontmatt
 - **Colour** is written to the node's `color` field in the `.canvas` file and rendered by Obsidian. Any of the six presets, a custom hex, or none.
 - **Label, frame and fade** come from a `citation-graph-status-*` class the plugin writes into the note's `cssclasses`, styled by fixed rules in `styles.css`.
 
-`annotated` is derived at paint time from the note body and never stored in `status:`, though it is written as a class like any other display status.
+`annotated` is never stored in `status:`. It is derived at paint time from **both** halves of what its label claims: the stored status is `read`, *and* the note body has content beyond the generated scaffold. It is written as a class like any other display status.
 
 ## Current solution
 
@@ -37,6 +37,15 @@ No longer load-bearing, since nothing matches on the colour any more, but verifi
 
 ## History
 
+**2026-09-01 (later) — two bugs behind a frozen reading list.** A paper with a summary showed *Read + notes written* whatever it was set to, so cycling it did nothing visible, and before the `syncNoteClass` fix below it flipped between two labels at random.
+
+Two independent causes, both now covered by tests that fail against the previous code:
+
+1. `displayStatusFor` derived `annotated` from the note body alone, ignoring the stored status. Now it requires `read` as well.
+2. The cycle read the current status through `getStatus`, which goes to `metadataCache`. Obsidian refreshes that asynchronously, so two presses in quick succession both decided from the status before the first press. `updateStatus(file, next)` now reads the stored status and writes the answer inside one `processFrontMatter` call, so the decision cannot be separated from the write.
+
+The same stale-cache trap had just been fixed in `syncNoteClass`, which had compared against `metadataCache` and skipped the write that would have corrected a class `setStatus` had left behind. Three instances of one hazard: **anything that reads a note back immediately after writing it must read the file, not the cache.**
+
 **2026-09-01 — the runtime stylesheet is gone.** Obsidian's review forbids creating a `<style>` element, so the generated sheet had to go. Status moved back onto the note as a cssclass and `styles.css` became fully static, deleting `src/canvas/status-styles.ts`, its test, `applyStatusStyles`, `statusStyleEl`, the `onunload` cleanup, and every `@container style()` query along with the lowercase-hex coupling they depended on. See [[Community plugin submission]].
 
 Appearance is unchanged. Two behaviours improved as a side effect: two statuses sharing a colour are now told apart by their labels, and a status left on *No colour* is labelled correctly instead of falling back to "To read". The settings tab's colour-clash warning was reworded to match.
@@ -54,6 +63,15 @@ A code comment asserted that "style queries match on computed value, so this doe
 Fixed by splitting presets (matched by class) from custom colours (matched by value, under a style query), and extracting the generator into `src/canvas/status-styles.ts` so it was testable without an Obsidian runtime. That whole mechanism is now deleted.
 
 **Earlier**: status was carried by a per-status `cssclasses` entry, matched with `.canvas-node:has(.citation-graph-abandoned)`. Replaced by the colour-derived scheme so the `.canvas` file would be the single source of truth. Now back, for the reason above.
+
+## Deriving `annotated`
+
+`displayStatusFor(file, status)` returns `annotated` only when `status === "read"` and `hasUserNotes(file)`. Both conditions matter:
+
+- Requiring `read` is what makes the label honest. The plugin's own *Write summary* puts a `## Summary` section in the note, so deriving `annotated` from content alone marked papers as read that had never been opened.
+- Requiring content is what makes it derived rather than stored, so writing notes into a paper changes its appearance with no command involved. That is what *Refresh reading status* is for.
+
+Because `annotated` is reachable only from `read`, the cycle command moves cleanly through `unread → reading → read` and the canvas shows the third step as `annotated` when the note has content. Deriving it from content alone froze the cycle: every summarised paper displayed the same status whatever it was set to.
 
 ## Open questions
 
