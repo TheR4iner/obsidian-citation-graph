@@ -16,6 +16,16 @@ export interface FakeVault {
 	file(path: string): TFile;
 	/** Every path passed to `vault.createFolder`, in call order. */
 	createdFolders: string[];
+	/**
+	 * Pin `metadataCache` to the frontmatter as it stands right now, so later
+	 * writes are invisible to it.
+	 *
+	 * Obsidian refreshes the metadata cache asynchronously after
+	 * `processFrontMatter`, so code that writes a note and then reads the cache
+	 * sees what was there before the write. This models that, for the tests
+	 * that need to prove they do not depend on it.
+	 */
+	freezeCache(): void;
 }
 
 /**
@@ -52,10 +62,14 @@ export function makeVault(notes: Record<string, Partial<FakeNote>>): FakeVault {
 		return note;
 	};
 
+	let frozen: Map<string, Record<string, unknown> | null> | null = null;
+
 	const app = {
 		metadataCache: {
 			getFileCache: (file: TFile) => {
-				const fm = noteFor(file).fm;
+				const fm = frozen
+					? (frozen.get(file.path) ?? null)
+					: noteFor(file).fm;
 				return fm ? { frontmatter: fm } : {};
 			},
 		},
@@ -108,6 +122,14 @@ export function makeVault(notes: Record<string, Partial<FakeNote>>): FakeVault {
 			return file;
 		},
 		createdFolders,
+		freezeCache: () => {
+			frozen = new Map(
+				[...stored].map(([path, note]) => [
+					path,
+					note.fm ? { ...note.fm } : null,
+				])
+			);
+		},
 	};
 }
 
@@ -118,6 +140,8 @@ export function makeNote(note: Partial<FakeNote> = {}): {
 	/** The stored frontmatter, mutated in place by processFrontMatter. */
 	fm: () => Record<string, unknown> | null;
 	body: () => string;
+	/** See FakeVault#freezeCache. */
+	freezeCache: () => void;
 } {
 	const vault = makeVault({ "papers/Paper.md": note });
 	return {
@@ -125,5 +149,6 @@ export function makeNote(note: Partial<FakeNote> = {}): {
 		file: vault.file("papers/Paper.md"),
 		fm: () => vault.notes.get("papers/Paper.md")!.fm,
 		body: () => vault.notes.get("papers/Paper.md")!.body,
+		freezeCache: vault.freezeCache,
 	};
 }

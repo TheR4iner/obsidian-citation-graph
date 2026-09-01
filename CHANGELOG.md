@@ -6,7 +6,14 @@ Each released version here is also the body of the matching [GitHub release](htt
 
 ## [Unreleased]
 
+### Fixed
+
+- Cycling the reading status of a paper that has a summary or notes in it now works. Such a paper was labelled *Read + notes written* whatever its actual status, so cycling it appeared to do nothing, or to flip between two labels at random. Two separate causes: *Read + notes written* was derived from the note's content alone, which meant the plugin's own *Write summary* silently marked papers as read; and the cycle read the current status from Obsidian's metadata cache, which lags behind writes, so a second press could decide from the status before the first press.
+- *Read + notes written* now means both halves: a paper reaches it when it is marked *Read* **and** its note has content of its own. A paper you have never opened is no longer labelled as read because something was written into its note.
+
 ### Changed
+
+- Reading status is now drawn entirely from the plugin's stylesheet, so a theme or a CSS snippet can restyle any status without the plugin's help. Nothing looks different: the same labels, the same thicker frame on a paper you have started, the same dashed and faded treatment for an abandoned one. The status reaches the canvas as a `citation-graph-status-*` class on the literature note instead of being inferred from the node's colour, which has two visible consequences. Two statuses sharing a colour now read differently, by their labels, where before they were indistinguishable. And a status you left on *No colour* is now labelled correctly, where before it fell back to "To read".
 
 - **Citation Graph now requires Obsidian 1.7.2 or later.** The manifest previously claimed 1.4.0, which was never true: the settings tab has always needed 1.4.10, deleting a paper has needed 1.6.6, and the reference cache and log file need 1.7.2. On an older Obsidian the plugin failed to load rather than saying why. `versions.json` has been corrected for every past release for the same reason.
 - The README now sets out, in one place, every remote service the plugin contacts and what is sent to it, why PDFs live outside your vault, that the `claude` binary is the one already on your machine and nothing is ever downloaded or installed for you, and which features bill to your own account. There is no telemetry of any kind.

@@ -295,7 +295,7 @@ export class CitationGraphSettingTab extends PluginSettingTab {
         clashes.length === 0
           ? ""
           : clashes
-              .map((names) => `${names.join(" and ")} share a color and cannot be told apart on the canvas.`)
+              .map((names) => `${names.join(" and ")} share a color, so only their labels tell them apart.`)
               .join(" ")
       );
     };

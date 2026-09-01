@@ -99,30 +99,62 @@
   pointer-events: none;
 }
 
-/* Every paper starts as "to read" with the baseline frame. A paper carrying a
-   configured status colour has these four properties reassigned by the small
-   stylesheet the plugin generates at runtime (see applyStatusStyles in
-   main.ts): that sheet holds nothing but the mapping from colour to status,
-   because only the user's settings know which colour means what. Every value
-   the mapping selects between lives here, so a theme or a snippet can change
-   how a status looks without the plugin's help.
-
-   --cg-frame-width-active is the frame of a paper that has been engaged with,
-   thicker than the baseline so it reads as distinct even before the colour
-   registers. --cg-dim-abandoned fades a paper that was dropped. */
+/* The baseline every paper starts from. A paper carrying a status class picks
+   up its own label and frame from the block below. */
 .canvas-node:has(.citation-graph-note) .canvas-node-container {
   --cg-status-label: "To read";
-  --cg-frame-width-active: 5px;
-  --cg-dim-abandoned: 0.55;
   border-width: var(--cg-frame-width, 3px) !important;
   border-style: var(--cg-frame-style, solid) !important;
   opacity: var(--cg-dim, 1);
   transition: opacity 120ms ease-in-out;
 }
 
-/* A dimmed paper comes back to full strength under the pointer: the note has
-   to stay readable when you go back to it. */
-.canvas-node:has(.citation-graph-note):hover .canvas-node-container {
+/* Reading status, spelled out and drawn.
+ *
+ * The status reaches the DOM as a cssclass on the literature note, written by
+ * withNoteClass in src/notes/literature.ts whenever the plugin paints a
+ * canvas. The node's *colour* is a separate matter, set on the canvas node
+ * itself and rendered by Obsidian, which is why any colour the user picks --
+ * one of the six presets or a hex of their own -- styles identically here.
+ *
+ * These rules match the baseline above on specificity and follow it, so they
+ * win on source order. The label text is duplicated from STATUS_LABELS in
+ * src/types.ts; a test asserts the two agree.
+ *
+ * A paper that has been engaged with gets a frame thicker than the baseline,
+ * so it reads as distinct from an untouched one even before the colour
+ * registers. "To read" keeps the baseline: it is where every paper starts. */
+.canvas-node:has(.citation-graph-status-unread) .canvas-node-container {
+  --cg-status-label: "To read";
+}
+
+.canvas-node:has(.citation-graph-status-reading) .canvas-node-container {
+  --cg-status-label: "Reading";
+  --cg-frame-width: 5px;
+}
+
+.canvas-node:has(.citation-graph-status-read) .canvas-node-container {
+  --cg-status-label: "Read";
+  --cg-frame-width: 5px;
+}
+
+.canvas-node:has(.citation-graph-status-annotated) .canvas-node-container {
+  --cg-status-label: "Read + notes written";
+  --cg-frame-width: 5px;
+}
+
+/* An abandoned paper is dashed and faded, so a glance at the canvas separates
+   what was dropped from what is still ahead. */
+.canvas-node:has(.citation-graph-status-abandoned) .canvas-node-container {
+  --cg-status-label: "Abandoned";
+  --cg-frame-width: 5px;
+  --cg-frame-style: dashed;
+  --cg-dim: 0.55;
+}
+
+/* Hovering a faded paper restores it to full strength: the note has to stay
+   readable when you go back to it. */
+.canvas-node:has(.citation-graph-status-abandoned):hover .canvas-node-container {
   opacity: 1;
 }
 
