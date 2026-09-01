@@ -35,13 +35,64 @@ export class ArxivMetadataClient {
       }
     });
   }
+
+  /**
+   * Search arXiv for a title, returning the best few matches.
+   *
+   * This is how a paper held only under the DOI of its published version is
+   * found: arXiv's API has no DOI field to search, so the title is the only
+   * way in. Punctuation is stripped before the phrase is quoted, because a
+   * colon or a bracket in a title makes arXiv reject the whole query.
+   *
+   * Matches are candidates, not answers. The caller decides whether a returned
+   * title is really the same paper.
+   */
+  async searchByTitle(title: string, limit = 5): Promise<S2Paper[]> {
+    const phrase = title
+      .replace(/[^\p{L}\p{N} ]+/gu, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+      // arXiv rejects very long queries; the opening words identify a paper.
+      .split(" ")
+      .slice(0, 20)
+      .join(" ");
+    if (!phrase) return [];
+
+    return this.rateLimitedRequest(async () => {
+      try {
+        const params = new URLSearchParams({
+          search_query: `ti:"${phrase}"`,
+          max_results: String(limit),
+        });
+        const response = await requestUrl({ url: `${BASE}?${params}` });
+        return parseArxivEntries(response.text);
+      } catch (e) {
+        console.error(`Citation Graph: arXiv title search failed for "${title}"`, e);
+        return [];
+      }
+    });
+  }
+}
+
+/** Every entry in an arXiv Atom response, in the order arXiv ranked them. */
+function parseArxivEntries(xml: string): S2Paper[] {
+  const doc = new DOMParser().parseFromString(xml, "application/xml");
+  const papers: S2Paper[] = [];
+  for (const entry of Array.from(doc.querySelectorAll("entry"))) {
+    const paper = parseArxivEntry(entry, "");
+    if (paper) papers.push(paper);
+  }
+  return papers;
 }
 
 function parseArxivAtom(xml: string, requestedId: string): S2Paper | null {
   const doc = new DOMParser().parseFromString(xml, "application/xml");
   const entry = doc.querySelector("entry");
   if (!entry) return null;
+  return parseArxivEntry(entry, requestedId);
+}
 
+function parseArxivEntry(entry: Element, requestedId: string): S2Paper | null {
   // arXiv returns an empty <entry> with an error <title>Error</title> for
   // unknown IDs in some cases. Detect that and bail.
   const idEl = entry.querySelector("id");
@@ -64,6 +115,9 @@ function parseArxivAtom(xml: string, requestedId: string): S2Paper | null {
   // e.g. "http://arxiv.org/abs/1706.03762v7" → "1706.03762"
   const absMatch = idText.match(/arxiv\.org\/abs\/(.+?)(?:v\d+)?$/i);
   const canonicalArxiv = absMatch ? absMatch[1] : requestedId.replace(/v\d+$/i, "");
+  // A search result carries no requested ID to fall back on, so an entry whose
+  // id URL does not parse has nothing to identify it by.
+  if (!canonicalArxiv) return null;
 
   // DOI: prefer arxiv:doi element if present, otherwise synthesize the arXiv-minted DOI
   let doi: string | null = null;

@@ -16,8 +16,11 @@ function paperSelector(colour: string): string {
 /**
  * Build the stylesheet that turns a canvas node's colour into its status.
  *
- * Generated at runtime rather than written into styles.css because the
- * colours are user-configurable.
+ * What is generated here is only the *mapping*: each rule assigns the custom
+ * properties `styles.css` reads (the label, the frame width and style, the
+ * dimming). Every visual constant stays in `styles.css`, where a theme or a
+ * snippet can override it; JavaScript contributes nothing but the user's own
+ * configuration, because only the user knows which colour means which status.
  *
  * How a node advertises its colour depends on which kind it is, and only one
  * of the two kinds can be matched by value:
@@ -39,24 +42,22 @@ export function statusStyleRules(settings: CitationGraphSettings): string {
     const colour = statusColor(settings, status);
     if (!colour) continue; // shares the uncoloured default; the base rule labels it
     const paper = paperSelector(colour);
-    // A thicker frame than the 3px baseline, so a paper you have actually
-    // engaged with reads as distinct from an untouched one even before the
-    // colour registers. "To read" keeps the baseline: it has no configured
-    // colour, so it never reaches this loop.
-    const extra =
-      `\n    border-width: 5px !important;` +
-      (status === "abandoned"
-        ? `\n    border-style: dashed !important;\n    opacity: 0.55;`
-        : "");
+
+    const declarations = [`--cg-status-label: "${STATUS_LABELS[status]}";`];
+    // A thicker frame than the baseline, so a paper you have actually engaged
+    // with reads as distinct from an untouched one even before the colour
+    // registers. "To read" keeps the baseline: it has no configured colour, so
+    // it never reaches this loop.
+    declarations.push("--cg-frame-width: var(--cg-frame-width-active);");
+    if (status === "abandoned") {
+      declarations.push("--cg-frame-style: dashed;");
+      declarations.push("--cg-dim: var(--cg-dim-abandoned);");
+    }
+
     const body =
       `${paper} .canvas-node-container {\n` +
-      `    --cg-status-label: "${STATUS_LABELS[status]}";${extra}\n` +
-      `}` +
-      // Abandoned papers are dimmed, so hovering one restores it to full
-      // strength: the note has to stay readable when you go back to it.
-      (status === "abandoned"
-        ? `\n${paper}:hover .canvas-node-container { opacity: 1; }`
-        : "");
+      declarations.map((line) => `    ${line}`).join("\n") +
+      `\n}`;
 
     rules.push(
       isCustomColor(colour)

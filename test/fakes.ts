@@ -65,6 +65,11 @@ export function makeVault(notes: Record<string, Partial<FakeNote>>): FakeVault {
 			modify: async (file: TFile, content: string) => {
 				noteFor(file).body = content;
 			},
+			process: async (file: TFile, fn: (data: string) => string) => {
+				const note = noteFor(file);
+				note.body = fn(note.body);
+				return note.body;
+			},
 			getMarkdownFiles: () => [...files.values()],
 			getAbstractFileByPath: (path: string) =>
 				files.get(path) ?? (folders.has(path) ? ({ path } as unknown as TFile) : null),

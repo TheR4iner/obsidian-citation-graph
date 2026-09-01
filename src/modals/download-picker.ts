@@ -81,8 +81,16 @@ interface DownloadChoice {
   paper: Paper;
   selected: boolean;
   alreadyDownloaded: boolean;
-  /** Whether any configured source could even be tried for this paper. */
-  hasSource: boolean;
+  /**
+   * Whether a source is already known for this paper, without asking anyone.
+   *
+   * False does not mean unavailable: a paper stored under the DOI of its
+   * published version usually has no arXiv ID recorded and is on arXiv all the
+   * same. Those rows stay selectable, and the download run looks the paper up
+   * before giving up on it. What this decides is only what gets ticked by
+   * default, so a large canvas does not open with dozens of lookups queued.
+   */
+  knownSource: boolean;
 }
 
 export interface DownloadPickerResult {
@@ -134,7 +142,7 @@ export class DownloadPickerModal extends Modal {
     const fallback = getDownloadFallback();
 
     this.choices = this.papers.map((paper) => {
-      const hasSource =
+      const knownSource =
         (!!paper.arxiv && isValidArxivId(paper.arxiv)) ||
         (fallback !== null && fallback.canAttempt(paper));
 
@@ -148,12 +156,18 @@ export class DownloadPickerModal extends Modal {
         }
       }
 
-      return { paper, selected: !alreadyDownloaded && hasSource, alreadyDownloaded, hasSource };
+      return {
+        paper,
+        selected: !alreadyDownloaded && knownSource,
+        alreadyDownloaded,
+        knownSource,
+      };
     });
 
-    // Sort: downloadable first, then already downloaded, then no source
+    // Sort: ready to download first, then already downloaded, then the ones
+    // that need looking up.
     this.choices.sort((a, b) => {
-      if (a.hasSource !== b.hasSource) return a.hasSource ? -1 : 1;
+      if (a.knownSource !== b.knownSource) return a.knownSource ? -1 : 1;
       if (a.alreadyDownloaded !== b.alreadyDownloaded) return a.alreadyDownloaded ? 1 : -1;
       return (a.paper.title || "").localeCompare(b.paper.title || "");
     });
@@ -203,7 +217,7 @@ export class DownloadPickerModal extends Modal {
       .setButtonText("Select all")
       .onClick(() => {
         for (const c of this.choices) {
-          if (c.hasSource && !c.alreadyDownloaded) c.selected = true;
+          if (!c.alreadyDownloaded) c.selected = true;
         }
         this.renderList();
       });
@@ -233,7 +247,7 @@ export class DownloadPickerModal extends Modal {
           return;
         }
         const selected = this.choices
-          .filter((c) => c.selected && !c.alreadyDownloaded && c.hasSource)
+          .filter((c) => c.selected && !c.alreadyDownloaded)
           .map((c) => c.paper);
         if (selected.length === 0) {
           logNotice("No papers selected for download.");
@@ -253,13 +267,17 @@ export class DownloadPickerModal extends Modal {
   private updateCount(): void {
     if (!this.countEl) return;
     const total = this.choices.length;
-    const noSource = this.choices.filter((c) => !c.hasSource).length;
+    const needLookup = this.choices.filter(
+      (c) => !c.knownSource && !c.alreadyDownloaded
+    ).length;
     const downloaded = this.choices.filter((c) => c.alreadyDownloaded).length;
-    const selected = this.choices.filter((c) => c.selected && !c.alreadyDownloaded && c.hasSource).length;
+    const selected = this.choices.filter(
+      (c) => c.selected && !c.alreadyDownloaded
+    ).length;
 
     let text = `${total} papers`;
     if (downloaded > 0) text += ` · ${downloaded} already downloaded`;
-    if (noSource > 0) text += ` · ${noSource} without a source`;
+    if (needLookup > 0) text += ` · ${needLookup} to look up on arXiv`;
     text += ` · ${selected} selected`;
     this.countEl.setText(text);
   }
@@ -272,14 +290,14 @@ export class DownloadPickerModal extends Modal {
       const rowCls = [
         "citation-graph-paper-row",
         choice.alreadyDownloaded ? "is-downloaded" : "",
-        !choice.hasSource ? "is-no-source" : "",
+        !choice.knownSource ? "is-no-source" : "",
       ].filter(Boolean).join(" ");
 
       const row = this.listEl.createDiv(rowCls);
 
       const checkbox = row.createEl("input", { type: "checkbox" });
       checkbox.checked = choice.selected || choice.alreadyDownloaded;
-      checkbox.disabled = choice.alreadyDownloaded || !choice.hasSource;
+      checkbox.disabled = choice.alreadyDownloaded;
       checkbox.addEventListener("change", () => {
         choice.selected = checkbox.checked;
         this.updateCount();
@@ -303,9 +321,11 @@ export class DownloadPickerModal extends Modal {
       if (choice.alreadyDownloaded) {
         const badge = rightActions.createDiv("citation-graph-badge citation-graph-badge-downloaded");
         badge.setText("downloaded");
-      } else if (!choice.hasSource) {
+      } else if (!choice.knownSource) {
         const badge = rightActions.createDiv("citation-graph-badge citation-graph-badge-nosource");
-        badge.setText("no source");
+        badge.setText("no ID yet");
+        badge.title =
+          "No arXiv ID recorded for this paper. Selecting it searches arXiv by title before giving up.";
       }
     }
 
@@ -340,13 +360,32 @@ export class DownloadPickerModal extends Modal {
  *
  * `pluginDir` is the absolute path to the plugin's own directory; a fallback
  * receives it so it can locate helper files bundled alongside the plugin.
+ *
+ * `resolveArxiv` is asked for an arXiv ID whenever a paper carries none, so a
+ * paper stored under the DOI of its published version is looked up rather than
+ * written off. Any ID it finds comes back in `resolvedArxiv`, keyed by note
+ * path, for the caller to record so the next run needs no lookup.
  */
+export interface DownloadOptions {
+  onProgress?: (done: number, total: number, title: string) => void;
+  resolveArxiv?: (paper: Paper) => Promise<string | null>;
+}
+
+export interface DownloadOutcome {
+  downloaded: number;
+  failed: string[];
+  /** Note path → the arXiv ID a lookup turned up for it during this run. */
+  resolvedArxiv: Map<string, string>;
+}
+
 export async function downloadPapers(
   papers: Paper[],
   downloadPath: string,
   pluginDir: string,
-  onProgress?: (done: number, total: number, title: string) => void
-): Promise<{ downloaded: number; failed: string[] }> {
+  opts: DownloadOptions = {}
+): Promise<DownloadOutcome> {
+  const { onProgress, resolveArxiv } = opts;
+  const resolvedArxiv = new Map<string, string>();
   // Resolve a leading "~" before any filesystem use; fs/path don't do this.
   downloadPath = expandTilde(downloadPath);
   // Validate the download folder up-front: a bad path would otherwise fail
@@ -357,7 +396,7 @@ export async function downloadPapers(
   } catch (e) {
     const reason = e instanceof Error ? e.message : String(e);
     logNotice(`Cannot use download folder "${downloadPath}": ${reason}`, 10000);
-    return { downloaded: 0, failed: papers.map((p) => p.title) };
+    return { downloaded: 0, failed: papers.map((p) => p.title), resolvedArxiv };
   }
 
   // Probe the fallback once and gate every per-paper attempt on the result:
@@ -381,10 +420,25 @@ export async function downloadPapers(
       let fallbackError: Error | null = null;
       let arxivError: string | null = null;
 
-      // Try arxiv first if we have a valid arxiv ID
-      if (paper.arxiv && isValidArxivId(paper.arxiv)) {
+      // arXiv is always tried first, and a paper with no recorded arXiv ID is
+      // looked up rather than passed over: the ID is missing far more often
+      // than the preprint is.
+      let arxivId = paper.arxiv && isValidArxivId(paper.arxiv) ? paper.arxiv : null;
+      let lookedUp = false;
+      if (!arxivId && resolveArxiv) {
+        logNotice(`Searching arXiv for "${paper.title}"...`);
+        arxivId = await resolveArxiv(paper);
+        lookedUp = true;
+        if (arxivId) {
+          paper.arxiv = arxivId;
+          if (paper.notePath) resolvedArxiv.set(paper.notePath, arxivId);
+          logNotice(`Found on arXiv (${arxivId}): ${paper.title}`);
+        }
+      }
+
+      if (arxivId) {
         try {
-          savedPath = await downloadFromArxiv(paper.arxiv, downloadPath);
+          savedPath = await downloadFromArxiv(arxivId, downloadPath);
           logNotice(`Downloaded from arxiv: ${paper.title}`);
         } catch (arxivErr) {
           arxivError = arxivErr instanceof Error ? arxivErr.message : String(arxivErr);
@@ -403,6 +457,13 @@ export async function downloadPapers(
 
       if (!savedPath) {
         const arxivSuffix = arxivError ? ` (arXiv attempt: ${arxivError})` : "";
+        // Distinguish "arXiv does not have it" from "we never had an ID to
+        // try": the first is an answer, the second used to be reported as one.
+        const arxivVerdict = arxivError
+          ? "The arXiv download failed"
+          : lookedUp
+            ? "Not on arXiv: searched by DOI and by title"
+            : "No arXiv version found";
 
         if (fallbackError !== null && fallback !== null) {
           // Suppress duplicate setup errors (a missing prerequisite, an
@@ -418,9 +479,7 @@ export async function downloadPapers(
         }
         if (fallback === null) {
           throw new Error(
-            (arxivError
-              ? "The arXiv download failed and no other source is configured."
-              : "No arXiv version found, and no other source is configured.") + arxivSuffix
+            `${arxivVerdict}, and no other source is configured.${arxivSuffix}`
           );
         }
         if (!fallbackAvailable) {
@@ -456,7 +515,7 @@ export async function downloadPapers(
     }
   }
 
-  return { downloaded, failed };
+  return { downloaded, failed, resolvedArxiv };
 }
 
 /**

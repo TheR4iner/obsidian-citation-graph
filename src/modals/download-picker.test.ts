@@ -69,7 +69,7 @@ describe("downloadPapers", () => {
 	it("reports that no source is configured when the build has no fallback", async () => {
 		const result = await downloadPapers([makePaper()], dir, "/plugin");
 
-		expect(result).toEqual({ downloaded: 0, failed: ["A Paper"] });
+		expect(result).toMatchObject({ downloaded: 0, failed: ["A Paper"] });
 		expect(lastFailureReason()).toContain("no other source is configured");
 	});
 
@@ -155,7 +155,7 @@ describe("downloadPapers", () => {
 
 		const result = await downloadPapers([paper], dir, "/plugin");
 
-		expect(result).toEqual({ downloaded: 1, failed: [] });
+		expect(result).toMatchObject({ downloaded: 1, failed: [] });
 		expect(fs.readdirSync(dir)).toEqual([buildPaperFilename(paper, ".pdf")]);
 	});
 
@@ -176,6 +176,37 @@ describe("downloadPapers", () => {
 
 		const result = await downloadPapers([makePaper()], unusable, "/plugin");
 
-		expect(result).toEqual({ downloaded: 0, failed: ["A Paper"] });
+		expect(result).toMatchObject({ downloaded: 0, failed: ["A Paper"] });
+	});
+
+	// The complaint this exists for: a paper held under the DOI of its
+	// published version has no arXiv ID recorded, and used to be reported as
+	// having no source without arXiv ever being asked.
+	it("looks up an arXiv ID for a paper that has none", async () => {
+		const resolveArxiv = vi.fn(async () => "2301.01234");
+		const paper = makePaper({ doi: "10.1103/PhysRevX.1.011001", notePath: "papers/A.md" });
+
+		const result = await downloadPapers([paper], dir, "/plugin", { resolveArxiv });
+
+		expect(resolveArxiv).toHaveBeenCalledWith(paper);
+		// The download itself is not stubbed, so it fails; what matters is that
+		// the ID was found, recorded for the caller, and written onto the paper.
+		expect(result.resolvedArxiv.get("papers/A.md")).toBe("2301.01234");
+		expect(paper.arxiv).toBe("2301.01234");
+	});
+
+	it("says arXiv was searched when the lookup comes up empty", async () => {
+		const result = await downloadPapers([makePaper()], dir, "/plugin", {
+			resolveArxiv: async () => null,
+		});
+
+		expect(result).toMatchObject({ downloaded: 0, failed: ["A Paper"] });
+		expect(lastFailureReason()).toContain("searched by DOI and by title");
+	});
+
+	it("does not claim arXiv was searched when no resolver was supplied", async () => {
+		await downloadPapers([makePaper()], dir, "/plugin");
+
+		expect(lastFailureReason()).not.toContain("searched by DOI");
 	});
 });

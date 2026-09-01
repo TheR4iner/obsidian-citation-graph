@@ -4,7 +4,7 @@
 
 A paper's reading status is stored as `status:` in its literature note frontmatter and painted on the canvas as the node's `color` in the `.canvas` file. `annotated` is derived at paint time and never stored. The canvas node shows the status two ways: the frame colour, and a label spelled out along the bottom edge.
 
-The label, the 5px frame and the dashed/dimmed treatment for `abandoned` come from a stylesheet the plugin injects at runtime (`statusStyleRules` in `src/canvas/status-styles.ts`, applied by `applyStatusStyles` in `src/main.ts`). It has to be generated because the colours are user-configurable. The static half lives in `styles.css`.
+The label, the thicker frame and the dashed/dimmed treatment for `abandoned` are all defined in `styles.css`, as values of the custom properties `--cg-status-label`, `--cg-frame-width`, `--cg-frame-style` and `--cg-dim`. The stylesheet the plugin injects at runtime (`statusStyleRules` in `src/canvas/status-styles.ts`, applied by `applyStatusStyles` in `src/main.ts`) contains nothing but assignments of those four properties: it is the *mapping* from a node colour to a status, which has to be generated because only the user's settings know which colour means what. A test asserts the generated sheet contains no literal presentation value.
 
 ## How Obsidian exposes a node's colour
 
@@ -25,9 +25,13 @@ Consequence: presets can only be matched **by class**, and custom colours only *
 
 `parseStatusColor` already lowercases stored hex values, which is what makes the style query match Obsidian's normalised inline value. That coupling is load-bearing and is covered by a test.
 
-Statuses left on the uncoloured default emit nothing: the static rule in `styles.css` labels those "To read".
+Statuses left on the uncoloured default emit nothing: the static rule in `styles.css` labels those "To read" and gives the four properties their baseline values.
+
+Specificity is what makes the split work. The static paper rule is `.canvas-node:has(.citation-graph-note) .canvas-node-container` (0,3,0); every generated rule adds the colour class, reaching (0,4,0), so its assignments win.
 
 ## History
+
+**2026-09-01 — presentation moved out of the generated sheet.** The runtime stylesheet used to emit whole rule bodies, `border-width: 5px !important` and `opacity: 0.55` included, which put four visual constants somewhere no theme or snippet could reach and drew an obvious objection in the community plugin audit (see [[Community plugin submission]]). It now assigns custom properties only. The selectors were left byte-identical, because they are the delicate part; only the declaration bodies changed.
 
 **2026-08-27 — labels and the abandoned style silently stopped working.** Every paper kept the "To read" label whatever its colour, and abandoned papers showed a solid red frame instead of a dashed, dimmed one. Only the frame colour tracked the status, because that comes from a direct `var(--canvas-color)` substitution in `styles.css` rather than from the generated rules.
 

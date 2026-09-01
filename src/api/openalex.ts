@@ -82,6 +82,40 @@ export class OpenAlexClient {
     });
   }
 
+  /**
+   * Every URL OpenAlex knows this DOI is hosted at.
+   *
+   * Used to find the arXiv preprint of a paper held under the DOI of its
+   * published version. OpenAlex records each place a work appears, so the
+   * arXiv copy shows up as a location even when Semantic Scholar files the
+   * preprint and the journal article as two unrelated records.
+   */
+  async getLocationUrlsForDoi(doi: string): Promise<string[]> {
+    return this.rateLimitedRequest(async () => {
+      try {
+        const url = this.buildUrl(`/works/https://doi.org/${encodeDoiPath(doi)}`, {
+          select: "locations,best_oa_location",
+        });
+        const response = await requestUrl({ url });
+        const work = response.json;
+        const locations = [
+          ...(Array.isArray(work?.locations) ? work.locations : []),
+          work?.best_oa_location,
+        ];
+        const urls: string[] = [];
+        for (const location of locations) {
+          for (const key of ["landing_page_url", "pdf_url"]) {
+            const value = location?.[key];
+            if (typeof value === "string" && value) urls.push(value);
+          }
+        }
+        return urls;
+      } catch {
+        return [];
+      }
+    });
+  }
+
   private async fetchWork(doi: string): Promise<any | null> {
     return this.rateLimitedRequest(async () => {
       try {

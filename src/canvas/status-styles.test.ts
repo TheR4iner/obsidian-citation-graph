@@ -28,19 +28,35 @@ describe("statusStyleRules", () => {
 		expect(css).toContain('--cg-status-label: "Abandoned"');
 	});
 
-	it("dashes and dims abandoned papers, and restores them on hover", () => {
+	it("marks abandoned papers as dashed and dimmed", () => {
 		const css = statusStyleRules(settings({ colorAbandoned: "1" }));
-		expect(css).toContain("border-style: dashed !important;");
-		expect(css).toContain("opacity: 0.55;");
-		expect(css).toContain(
-			".canvas-node.mod-canvas-color-1:has(.citation-graph-note):hover .canvas-node-container { opacity: 1; }"
-		);
+		expect(css).toContain("--cg-frame-style: dashed;");
+		expect(css).toContain("--cg-dim: var(--cg-dim-abandoned);");
 	});
 
-	it("leaves other statuses undashed", () => {
+	it("leaves other statuses undashed and undimmed", () => {
 		const css = statusStyleRules(settings({ colorAbandoned: "", colorReading: "3" }));
 		expect(css).not.toContain("dashed");
-		expect(css).not.toContain("opacity");
+		expect(css).not.toContain("--cg-dim");
+	});
+
+	it("thickens the frame of every status that has a colour", () => {
+		const css = statusStyleRules(settings({ colorReading: "3" }));
+		expect(css).toContain("--cg-frame-width: var(--cg-frame-width-active);");
+	});
+
+	// The point of the split: the generated sheet decides which status a colour
+	// means, and styles.css decides what that status looks like. A hard-coded
+	// length or opacity here would be unreachable from a theme or a snippet.
+	it("assigns custom properties only, never literal presentation values", () => {
+		const css = statusStyleRules(
+			settings({ colorReading: "3", colorRead: "5", colorAnnotated: "4", colorAbandoned: "1" })
+		);
+		for (const declaration of css.match(/^\s+[a-z-]+:/gm) ?? []) {
+			expect(declaration.trim()).toMatch(/^--/);
+		}
+		expect(css).not.toContain("!important");
+		expect(css).not.toContain("px");
 	});
 
 	// Custom colours all share one class, so only their value tells them apart.
