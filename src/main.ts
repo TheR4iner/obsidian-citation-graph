@@ -48,7 +48,6 @@ import { RecommendPromptModal } from "./modals/recommend-prompt-modal";
 import { RecommendPickerModal } from "./modals/recommend-picker";
 import { StatusPickerModal } from "./modals/status-picker";
 import {
-  PostAddSummaryModal,
   BatchMissingPdfModal,
   BatchLongPaperWarningModal,
   BatchSummaryModeModal,
@@ -1019,21 +1018,6 @@ export default class CitationGraphPlugin extends Plugin {
       if (resolved.references.length === 0 && resolved.citations.length === 0) {
         logNotice(
           `Warning: No references or citations could be resolved for "${paper.title}". The paper was added without citation edges.`
-        );
-      }
-
-      // Offer LLM summarization if configured
-      if (isLlmConfigured(this.settings)) {
-        const wantsSummary = await new PostAddSummaryModal(this.app).pick();
-        if (wantsSummary) {
-          await this.summarizePapersWithPdfs(
-            [paper],
-            (canvasData.citationGraphMeta?.lastDownloadPath as string) || "",
-          );
-        }
-      } else {
-        logNotice(
-          "Tip: Configure LLM settings to enable automatic paper summarization."
         );
       }
     } catch (e) {

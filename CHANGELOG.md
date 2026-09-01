@@ -12,6 +12,10 @@ Each released version here is also the body of the matching [GitHub release](htt
 
 - Paper pickers now unfold a full abstract on request: rows still show the first 200 characters, and a **Show more** link next to the cut opens the rest in place (**Show less** folds it back). Every picker gains this, so the abstracts in *Expand paper*, *Recommend papers* and the rest can be read without leaving the dialog. An unfolded abstract stays open while you type in the search box or mark a paper uninteresting.
 
+### Changed
+
+- *Add paper by DOI or arXiv ID* no longer asks whether to write an LLM summary once the paper is on the canvas, and no longer suggests configuring an LLM when none is set up. Summarising is a paid call on a paper you may not have decided to read yet, so it now happens only when you ask for it: run *Write summary* from the command palette, or from a paper node's right-click menu.
+
 ### Fixed
 
 - *Expand paper* now draws the citation edge for a paper whose metadata came from OpenAlex, arXiv or Crossref rather than Semantic Scholar. Such a paper was added to the canvas as a node and a note, but its arrow to the expanded paper was dropped without a word, so the two sat side by side unconnected.
