@@ -57,6 +57,7 @@ import type { BannedPaper } from "./types";
 import { LiteratureNoteManager, readFrontmatterArxiv } from "./notes/literature";
 import { hasSummarySection, insertSummaryText } from "./notes/summary-text";
 import { buildCanvas, expandCanvas, resolveNewEdges } from "./canvas/builder";
+import { parseCanvasData } from "./canvas/parse";
 import { registerCanvasPaperMenu } from "./canvas/node-menu";
 import { hasPaperNode, resolvePaperNodeId, layoutPapers, layoutNewPapers } from "./canvas/layout";
 import { S2RefCache } from "./api/s2-cache";
@@ -614,14 +615,13 @@ export default class CitationGraphPlugin extends Plugin {
       }
 
       // 2. Read canvas data
-      const canvasContent = await this.app.vault.read(activeFile);
-      const canvasData = JSON.parse(canvasContent) as CanvasData & {
+      const canvasData = await this.readCanvas<{
         citationGraphMeta?: {
           zoteroCollectionKey: string;
           collectionName: string;
           bannedPapers?: BannedPaper[];
         };
-      };
+      }>(activeFile);
 
       // 3. Ask user which paper to expand (pick from nodes)
       const fileNodes = canvasData.nodes.filter(
@@ -947,13 +947,12 @@ export default class CitationGraphPlugin extends Plugin {
       const paper = s2PaperToPaper(s2Paper);
 
       // 4. Read canvas data
-      const canvasContent = await this.app.vault.read(activeFile);
-      const canvasData = JSON.parse(canvasContent) as CanvasData & {
+      const canvasData = await this.readCanvas<{
         citationGraphMeta?: {
           collectionName: string;
           [key: string]: unknown;
         };
-      };
+      }>(activeFile);
 
       // Check if paper is already on canvas
       const existingNodeIds = new Set(canvasData.nodes.map((n) => n.id));
@@ -994,9 +993,17 @@ export default class CitationGraphPlugin extends Plugin {
       // Sync read colors on new nodes
       await this.syncStatusColors(updatedCanvas.nodes);
 
+      // A canvas the user created by hand has no metadata block yet. Seed one
+      // named after the file, or the commands that key off it (sending papers
+      // to another canvas, Zotero sync) would refuse a canvas built entirely
+      // this way.
       const updatedWithMeta = {
         ...updatedCanvas,
-        citationGraphMeta: canvasData.citationGraphMeta,
+        citationGraphMeta: canvasData.citationGraphMeta ?? {
+          zoteroCollectionKey: "",
+          collectionName: activeFile.basename,
+          bannedPapers: [] as BannedPaper[],
+        },
       };
 
       await this.app.vault.modify(
@@ -1150,9 +1157,7 @@ export default class CitationGraphPlugin extends Plugin {
         return;
       }
 
-      const canvasData = JSON.parse(
-        await this.app.vault.read(activeFile)
-      ) as CanvasData;
+      const canvasData = await this.readCanvas(activeFile);
 
       const papers = this.canvasPapers(canvasData);
       if (papers.length < 2) {
@@ -1295,12 +1300,12 @@ export default class CitationGraphPlugin extends Plugin {
         return;
       }
 
-      const canvasData = JSON.parse(await this.app.vault.read(canvasFile)) as CanvasData & {
+      const canvasData = await this.readCanvas<{
         citationGraphMeta?: {
           bannedPapers?: BannedPaper[];
           [key: string]: unknown;
         };
-      };
+      }>(canvasFile);
 
       if (!canvasData.nodes.some((n) => n.type === "file" && n.file)) {
         logNotice("No paper nodes found on this canvas.");
@@ -1586,15 +1591,14 @@ export default class CitationGraphPlugin extends Plugin {
       }
 
       // 2. Read canvas and extract papers
-      const canvasContent = await this.app.vault.read(activeFile);
-      const canvasData = JSON.parse(canvasContent) as CanvasData & {
+      const canvasData = await this.readCanvas<{
         citationGraphMeta?: {
           zoteroCollectionKey: string;
           collectionName: string;
           bannedPapers?: BannedPaper[];
           lastDownloadPath?: string;
         };
-      };
+      }>(activeFile);
 
       const fileNodes = canvasData.nodes.filter(
         (n) => n.type === "file" && n.file
@@ -1713,13 +1717,12 @@ export default class CitationGraphPlugin extends Plugin {
         return;
       }
 
-      const canvasContent = await this.app.vault.read(activeFile);
-      const canvasData = JSON.parse(canvasContent) as CanvasData & {
+      const canvasData = await this.readCanvas<{
         citationGraphMeta?: {
           zoteroCollectionKey: string;
           collectionName: string;
         };
-      };
+      }>(activeFile);
 
       // 2. Read paper metadata from all file nodes on canvas
       const fileNodes = canvasData.nodes.filter((n) => n.type === "file" && n.file);
@@ -1938,9 +1941,9 @@ export default class CitationGraphPlugin extends Plugin {
         return;
       }
 
-      const canvasData = JSON.parse(await this.app.vault.read(canvasFile)) as CanvasData & {
+      const canvasData = await this.readCanvas<{
         citationGraphMeta?: Record<string, unknown>;
-      };
+      }>(canvasFile);
 
       await this.syncStatusColors(canvasData.nodes);
       await this.app.vault.modify(canvasFile, JSON.stringify(canvasData, null, 2));
@@ -2238,6 +2241,15 @@ export default class CitationGraphPlugin extends Plugin {
     return null;
   }
 
+  /**
+   * Read and parse a canvas file. Goes through `parseCanvasData` so that the
+   * empty file Obsidian writes for a brand-new canvas reads as an empty graph
+   * instead of throwing "Unexpected end of JSON input".
+   */
+  private async readCanvas<T = unknown>(file: TFile): Promise<CanvasData & T> {
+    return parseCanvasData<T>(await this.app.vault.read(file), file.path);
+  }
+
   /** Ask the user to pick one paper node from a canvas. */
   private pickPaperNode(fileNodes: CanvasNode[]): Promise<string | null> {
     return new Promise((resolve) => {
@@ -2283,9 +2295,9 @@ export default class CitationGraphPlugin extends Plugin {
       return null;
     }
 
-    const canvasData = JSON.parse(await this.app.vault.read(canvasFile)) as CanvasData & {
+    const canvasData = await this.readCanvas<{
       citationGraphMeta?: Record<string, unknown>;
-    };
+    }>(canvasFile);
 
     const fileNodes = canvasData.nodes.filter((n) => n.type === "file" && n.file);
     if (fileNodes.length === 0) {
@@ -2341,13 +2353,12 @@ export default class CitationGraphPlugin extends Plugin {
 
       if (!confirmed) return;
 
-      const canvasContent = await this.app.vault.read(activeFile);
-      const canvasData = JSON.parse(canvasContent) as CanvasData & {
+      const canvasData = await this.readCanvas<{
         citationGraphMeta?: {
           zoteroCollectionKey: string;
           collectionName: string;
         };
-      };
+      }>(activeFile);
 
       const fileNodes = canvasData.nodes.filter((n) => n.type === "file" && n.file);
       if (fileNodes.length === 0) {
@@ -2445,15 +2456,14 @@ export default class CitationGraphPlugin extends Plugin {
       }
 
       // 2. Read source canvas
-      const sourceContent = await this.app.vault.read(activeFile);
-      const sourceData = JSON.parse(sourceContent) as CanvasData & {
+      const sourceData = await this.readCanvas<{
         citationGraphMeta?: {
           zoteroCollectionKey: string;
           collectionName: string;
           bannedPapers?: BannedPaper[];
           lastDownloadPath?: string;
         };
-      };
+      }>(activeFile);
 
       if (!sourceData.citationGraphMeta) {
         logNotice("This canvas is not a citation graph canvas.");
@@ -2606,10 +2616,9 @@ export default class CitationGraphPlugin extends Plugin {
       if (!targetFile) return;
 
       // 8. Read target canvas
-      const targetContent = await this.app.vault.read(targetFile);
-      const targetData = JSON.parse(targetContent) as CanvasData & {
+      const targetData = await this.readCanvas<{
         citationGraphMeta?: Record<string, unknown>;
-      };
+      }>(targetFile);
 
       // 9. Compute edges to carry over.
       // The same paper can sit under different node IDs on the two canvases:
@@ -2757,15 +2766,14 @@ export default class CitationGraphPlugin extends Plugin {
         return;
       }
 
-      const canvasContent = await this.app.vault.read(activeFile);
-      const canvasData = JSON.parse(canvasContent) as CanvasData & {
+      const canvasData = await this.readCanvas<{
         citationGraphMeta?: {
           zoteroCollectionKey: string;
           collectionName: string;
           bannedPapers?: BannedPaper[];
           lastDownloadPath?: string;
         };
-      };
+      }>(activeFile);
 
       const fileNodes = canvasData.nodes.filter(
         (n) => n.type === "file" && n.file
