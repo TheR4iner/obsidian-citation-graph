@@ -43,7 +43,7 @@ export class StatusPickerModal extends FuzzySuggestModal<PaperStatus> {
 
   onClose(): void {
     // onChooseItem fires before onClose, so defer to let a choice win.
-    setTimeout(() => this.settle(null), 50);
+    window.setTimeout(() => this.settle(null), 50);
   }
 
   private settle(status: PaperStatus | null): void {

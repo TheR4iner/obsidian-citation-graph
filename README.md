@@ -12,6 +12,7 @@ Six papers on a canvas. Each node is a literature note, its border colour is the
 
 - [What it does](#what-it-does)
 - [Requirements](#requirements)
+- [What this plugin sends, reads and costs](#what-this-plugin-sends-reads-and-costs)
 - [Installation](#installation)
 - [Quick start](#quick-start)
 - [Commands](#commands)
@@ -46,11 +47,33 @@ Zoomed out, the shape of the literature shows: papers are placed left to right b
 
 ## Requirements
 
-- **Obsidian 1.4.0 or later**, on desktop. The plugin talks to local processes and the filesystem, so it does not run on mobile.
+- **Obsidian 1.7.2 or later**, on desktop. The plugin talks to local processes and the filesystem, so it does not run on mobile.
 - **Zotero**, running, with the local API enabled: Edit, Settings, Advanced, then tick *"Allow other applications on this computer to communicate with Zotero"*.
 - **Better BibTeX** (recommended) for the citekeys used in note filenames and matching.
 - For *Write summary* and *Recommend papers*: an API key for Anthropic, OpenAI or Google Gemini, or the Claude CLI installed locally.
 - For *Sync canvas to Zotero*: a Zotero API key and user ID from [zotero.org/settings/keys](https://www.zotero.org/settings/keys).
+
+## What this plugin sends, reads and costs
+
+Nothing here happens without you running a command, and nothing is collected about you: the plugin has no telemetry, no analytics and no server of its own.
+
+**Remote services.** Each is contacted only by the command that needs it.
+
+| Service | When | What is sent |
+| --- | --- | --- |
+| Zotero local API, `localhost:23119` | *Create from collection*, *Create from tag* | Nothing leaves your machine |
+| `api.semanticscholar.org` | Resolving papers and their citation links | DOIs, arXiv IDs, paper titles |
+| `api.openalex.org` | Papers Semantic Scholar cannot resolve; finding an arXiv preprint behind a publisher DOI | DOIs, and your contact email if you set one |
+| `api.crossref.org` | Papers the above cannot resolve | DOIs, and your contact email if you set one |
+| `export.arxiv.org`, `arxiv.org` | arXiv metadata, title search, PDF download | arXiv IDs, paper titles |
+| `api.zotero.org` | *Sync canvas to Zotero* | Paper metadata, plus your Zotero API key |
+| `api.anthropic.com`, `api.openai.com`, `generativelanguage.googleapis.com` | *Write summary*, *Recommend papers* | The paper's PDF, or the canvas's titles, authors, years and identifiers; abstracts only if you tick *Include abstracts* |
+
+**Files outside your vault.** PDFs are not notes, so they are not kept in the vault. *Download* writes them to the folder you name, and *Write summary* reads them back from it to send to a model. The plugin touches no other path. It also writes its own log and reference cache inside its plugin folder, which lives in your vault's configuration directory.
+
+**A local process.** If you choose the *Claude CLI* provider, *Write summary* and *Recommend papers* run the `claude` binary already installed on your machine, at the path you configure. Nothing is downloaded or installed for you, ever.
+
+**Costs.** The plugin is free, and so is everything it needs to build a canvas. *Write summary* and *Recommend papers* are the exception: they call Anthropic, OpenAI or Google under your own account, and those providers bill you per call. Without a key there are no summaries and no recommendations; every other feature works without one.
 
 ## Installation
 
@@ -120,11 +143,11 @@ Right-clicking a paper node offers the per-paper commands directly: *Expand pape
 </tr>
 </table>
 
-The same paper in four of the five states, at the default colours. The fifth, *Read + notes written*, is green and appears as soon as the note has content of its own.
+The same paper in four of the five states, at the default colours. The fifth, *Read + notes written*, is green and appears once a paper marked *Read* has content of its own in the note.
 
 **Status lives in the note**, in a `status` frontmatter field, so it follows a paper across every canvas it appears on and is queryable from Dataview. Notes predating this feature carry `read: true` and are treated as *read* until their status is next set.
 
-**"Read with notes written" is derived, not stored.** As soon as a note contains anything beyond the generated template, whether your own prose, an added heading, a checklist, or a summary from *Write summary*, the paper is painted as annotated. It is therefore absent from the status picker, and it is why *Refresh reading status* exists: writing notes changes a paper's appearance with no command involved. Abandoned papers are the exception and stay abandoned, since notes on them usually record why you dropped the paper.
+**"Read + notes written" is derived, not stored.** A paper reaches it when it is marked *Read* **and** its note contains anything beyond the generated template: your own prose, an added heading, a checklist, or a summary from *Write summary*. Both halves are required, so a paper you have not read yet is never labelled as read, however much has been written into its note. It is absent from the status picker for the same reason it exists at all, and it is why *Refresh reading status* exists: writing notes into a paper you have already read changes its appearance with no command involved.
 
 ### Reading an abstract in the picker
 
@@ -222,7 +245,7 @@ Queried alongside Semantic Scholar so a paper it does not know, or references it
 | **To read** | Node colour for papers not started | No colour |
 | **Reading** | Node colour for papers in progress | Yellow |
 | **Read** | Node colour for papers finished but not written up | Cyan |
-| **Read + notes written** | Node colour applied automatically once the note has content of its own | Green |
+| **Read + notes written** | Node colour applied automatically to a paper marked *Read* whose note has content of its own | Green |
 | **Abandoned** | Node colour for papers you decided not to finish; also dimmed with a dashed border | Red |
 
 See [How status colours are drawn](#how-status-colours-are-drawn) below.
@@ -266,7 +289,7 @@ The provider chosen here is also the one *Recommend papers* uses.
 
 The colour is applied to the node's **border only**, a 3px frame at full strength with Obsidian's tinted interior removed, and the status is spelled out along the bottom edge in the same colour (pictured under [Reading status](#reading-status)). Obsidian's default treatment (a 1px border at 40% opacity plus a 7% wash) is too weak to separate similar colours and tints the note's text for no benefit; at full strength on the border alone, the closest pair of statuses is roughly three times easier to tell apart.
 
-The label is derived from the node's colour rather than stored alongside it, which keeps the `.canvas` file the single source of truth. One consequence: **two statuses sharing a colour cannot be told apart**, and the settings tab warns you when that happens.
+Colour and label are drawn from different places. The colour lives on the canvas node, where Obsidian renders it; the label, the thicker frame and the fade on an abandoned paper come from a `citation-graph-status-*` class the plugin writes into the note, which `styles.css` styles. So two statuses sharing a colour still read differently, by their labels, though the settings tab points the clash out because the colours themselves stop carrying meaning. It also means a CSS snippet can restyle any status without touching the plugin.
 
 Each colour is one of Obsidian's six presets, *No colour*, or a custom `#rrggbb` value. Presets follow your theme's `--color-*` variables; a hex value is fixed and will not adapt between light and dark mode, which is the trade-off for matching a theme that does not define those variables.
 
@@ -286,12 +309,15 @@ semantic_scholar_id: "204e3073870fae3d05bcbc2f6a8e263d9b72e776"
 status: unread
 cssclasses:
   - citation-graph-note
+  - citation-graph-status-unread
 ---
 ```
 
 The body carries a title heading, an author/year/DOI/arXiv block, a `## Summary` section written by *Write summary*, and a `## Notes` section for you.
 
-`status` holds one of `unread`, `reading`, `read` or `abandoned`, which the interface labels *To read*, *Reading*, *Read* and *Abandoned*. *Read + notes written* has no stored value: it is derived from the note's body.
+`status` holds one of `unread`, `reading`, `read` or `abandoned`, which the interface labels *To read*, *Reading*, *Read* and *Abandoned*. *Read + notes written* has no stored value: it is derived, from `read` plus content in the note's body.
+
+`cssclasses` carries `citation-graph-note`, which marks the note as a paper, and one `citation-graph-status-*` class the canvas styling reads. Both are rewritten whenever the plugin paints a canvas, so edit `status` rather than the class; any classes of your own are left where they are.
 
 ## How it works
 

@@ -156,6 +156,7 @@ export class LiteratureNoteManager {
     // (Windows also rejects those). Preserve spaces and capitalization elsewhere.
     const clean = (value: string): string =>
       value
+        // eslint-disable-next-line no-control-regex -- illegal in filenames, matched on purpose
         .replace(/[\\/:*?"<>|\x00-\x1f]/g, "")
         .replace(/\s+/g, " ")
         .replace(/^[. ]+/, "")
@@ -283,7 +284,7 @@ ${paper.arxiv ? `**arXiv**: [${escapeNoteText(paper.arxiv)}](https://arxiv.org/a
       fm.citekey = paper.citekey || null;
       fm.semantic_scholar_id = paper.semanticScholarId || null;
       fm.status = "unread" satisfies PaperStatus;
-      fm.cssclasses = [NOTE_CLASS];
+      fm.cssclasses = withNoteClass(fm.cssclasses, "unread");
     });
     paper.notePath = path;
     // Keep the index current so later papers in the same batch see this note
@@ -402,13 +403,21 @@ ${paper.arxiv ? `**arXiv**: [${escapeNoteText(paper.arxiv)}](https://arxiv.org/a
 
   /**
    * Derive the display status from a status the caller already knows.
+   *
+   * "Read + notes written" means exactly that, so only a paper marked *read*
+   * can reach it. Deriving it from the note body alone made the label lie
+   * about papers that had never been opened, since the plugin's own *Write
+   * summary* puts content in the note, and it froze the reading list: every
+   * summarised paper showed the same status whatever it was set to, so
+   * cycling one appeared to do nothing.
+   *
    * Callers that have just written a status must use this rather than
    * getDisplayStatus: Obsidian refreshes the metadata cache asynchronously
    * after processFrontMatter, so re-reading it here would see the old value
    * and paint the wrong color.
    */
   async displayStatusFor(file: TFile, status: PaperStatus): Promise<DisplayStatus> {
-    if (status === "abandoned") return status;
+    if (status !== "read") return status;
     return (await this.hasUserNotes(file)) ? "annotated" : status;
   }
 
@@ -417,34 +426,62 @@ ${paper.arxiv ? `**arXiv**: [${escapeNoteText(paper.arxiv)}](https://arxiv.org/a
    * ever one source of truth, and keeping the abandoned cssclass in step.
    */
   async setStatus(file: TFile, status: PaperStatus): Promise<void> {
-    await this.app.fileManager.processFrontMatter(file, (fm) => {
-      fm.status = status;
-      if ("read" in fm) delete fm.read;
-      fm.cssclasses = withNoteClass(fm.cssclasses);
-    });
+    await this.updateStatus(file, () => status);
   }
 
   /**
-   * Ensure a note carries the marker class and no stale per-status classes.
-   * Writes only when something would actually change, so it is a no-op once
-   * a note is clean.
+   * Choose a note's next status from the one it actually holds, and write it.
    *
-   * The marker is how the canvas stylesheet tells a paper from one of the
-   * user's own notes sharing the canvas. Unlike the per-status classes it
-   * cleans up, it is written once at creation and never varies with status.
+   * `next` is handed the status read out of the file inside the same
+   * `processFrontMatter` call that writes the answer, so the two cannot be
+   * separated. Deciding from `getStatus` instead would read `metadataCache`,
+   * which Obsidian refreshes asynchronously: two quick presses of the cycle
+   * command would both see the status from before the first press, and the
+   * second would rewrite what the first had already written.
+   *
+   * The class written here carries the *stored* status. "annotated" is
+   * derived from the note body, which this synchronous callback cannot read,
+   * so a caller that needs the distinction follows up with `syncNoteClass`.
    */
-  async syncNoteClass(file: TFile): Promise<boolean> {
-    const current = normalizeCssClasses(
-      this.app.metadataCache.getFileCache(file)?.frontmatter?.cssclasses
-    );
-    const next = withNoteClass(current);
-    if (current.length === next.length && current.every((c, i) => c === next[i])) {
-      return false;
-    }
+  async updateStatus(
+    file: TFile,
+    next: (current: PaperStatus) => PaperStatus
+  ): Promise<PaperStatus> {
+    let written: PaperStatus = "unread";
     await this.app.fileManager.processFrontMatter(file, (fm) => {
-      fm.cssclasses = next;
+      const stored =
+        parsePaperStatus(fm.status) ?? (fm.read === true ? "read" : "unread");
+      written = next(stored);
+      fm.status = written;
+      if ("read" in fm) delete fm.read;
+      fm.cssclasses = withNoteClass(fm.cssclasses, written);
     });
-    return true;
+    return written;
+  }
+
+  /**
+   * Bring a note's cssclasses in step with the status it is being painted
+   * with: the marker class that tells a paper from one of the user's own
+   * notes, and one status class for the canvas stylesheet to key off.
+   *
+   * The comparison happens inside `processFrontMatter`, against the note as it
+   * is on disk, and deliberately not against `metadataCache`. Obsidian
+   * refreshes that cache asynchronously after a write, so a caller that has
+   * just called `setStatus` would be compared against the classes from before
+   * that call. When those happen to equal what this method wants to write, it
+   * would skip the write and leave `setStatus`'s class in place: the note then
+   * says one status and the canvas node is painted another.
+   */
+  async syncNoteClass(file: TFile, status?: DisplayStatus | null): Promise<boolean> {
+    let changed = false;
+    await this.app.fileManager.processFrontMatter(file, (fm) => {
+      const current = normalizeCssClasses(fm.cssclasses);
+      const next = withNoteClass(current, status);
+      changed =
+        current.length !== next.length || current.some((c, i) => c !== next[i]);
+      if (changed) fm.cssclasses = next;
+    });
+    return changed;
   }
 
   /** Create notes for multiple papers, returning a map of paper ID -> note path */
@@ -463,19 +500,30 @@ ${paper.arxiv ? `**arXiv**: [${escapeNoteText(paper.arxiv)}](https://arxiv.org/a
 }
 
 /**
- * Rewrite a note's cssclasses so it carries exactly the marker class and one
- * status class, preserving any classes the user added themselves.
+ * Rewrite a note's cssclasses so it carries exactly the marker class and, when
+ * one is given, exactly one status class, preserving any classes the user
+ * added themselves.
  *
  * NOTE_CLASS is ensured rather than assumed: a note the plugin adopted from
  * the vault rather than created would otherwise miss the canvas styling and
  * keep Obsidian's default washed rendering while every sibling shows a
  * status border.
+ *
+ * The status class is what `styles.css` reads to write the label along a
+ * node's bottom edge and to dash and fade an abandoned paper. Colour is not
+ * involved: that stays the canvas file's business, so the two are free to be
+ * configured independently and a custom colour styles exactly like a preset.
+ * Any stale status class is dropped, so a paper carries at most one.
  */
-export function withNoteClass(existing: unknown): string[] {
+export function withNoteClass(
+  existing: unknown,
+  status?: DisplayStatus | null
+): string[] {
   const others = normalizeCssClasses(existing).filter(
     (c) => c !== NOTE_CLASS && !c.startsWith(STATUS_CLASS_PREFIX)
   );
-  return [NOTE_CLASS, ...others];
+  const statusClass = status ? [`${STATUS_CLASS_PREFIX}${status}`] : [];
+  return [NOTE_CLASS, ...statusClass, ...others];
 }
 
 /**

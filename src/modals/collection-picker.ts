@@ -51,7 +51,7 @@ export class CollectionPickerModal extends FuzzySuggestModal<CollectionChoice> {
 
   onClose(): void {
     // Delay null resolution to give onChooseItem a chance to fire first
-    setTimeout(() => {
+    window.setTimeout(() => {
       if (this.resolvePromise && !this.resolved) {
         this.resolved = true;
         this.resolvePromise(null);

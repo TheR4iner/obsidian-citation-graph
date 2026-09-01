@@ -33,11 +33,11 @@ export class BatchMissingPdfModal extends Modal {
 
     const footer = contentEl.createDiv({ cls: "citation-graph-footer" });
     new ButtonComponent(footer)
-      .setButtonText("Download All")
+      .setButtonText("Download all")
       .setCta()
       .onClick(() => { this.resolvePromise?.("download"); this.resolvePromise = null; this.close(); });
     new ButtonComponent(footer)
-      .setButtonText("Skip These")
+      .setButtonText("Skip these")
       .onClick(() => { this.resolvePromise?.("skip"); this.resolvePromise = null; this.close(); });
     new ButtonComponent(footer)
       .setButtonText("Cancel")
@@ -91,7 +91,7 @@ export class BatchLongPaperWarningModal extends Modal {
 
     const footer = contentEl.createDiv({ cls: "citation-graph-footer" });
     new ButtonComponent(footer)
-      .setButtonText("Proceed with All")
+      .setButtonText("Proceed with all")
       .setCta()
       .onClick(() => { this.resolvePromise?.(true); this.resolvePromise = null; this.close(); });
     new ButtonComponent(footer)

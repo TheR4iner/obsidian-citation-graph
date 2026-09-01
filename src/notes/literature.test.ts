@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { Paper } from "../types";
+import type { Paper, PaperStatus } from "../types";
+import { nextStatusInCycle } from "../types";
 import {
 	LiteratureNoteManager,
 	bodyHasUserContent,
@@ -135,15 +136,35 @@ describe("readFrontmatterArxiv", () => {
 });
 
 describe("withNoteClass", () => {
-	it("writes no per-status class", () => {
-		// Status comes from the canvas node colour now, not a cssclass.
+	it("writes the status it is given as a class", () => {
+		expect(withNoteClass([], "reading")).toEqual([
+			NOTE_CLASS,
+			"citation-graph-status-reading",
+		]);
+	});
+
+	it("writes no status class when none is given", () => {
 		expect(withNoteClass([])).toEqual([NOTE_CLASS]);
+		expect(withNoteClass([], null)).toEqual([NOTE_CLASS]);
+	});
+
+	// A paper carries at most one status class, or the stylesheet would apply
+	// two labels to the same node and the later rule would win by accident.
+	it("replaces a stale status class rather than adding to it", () => {
+		expect(withNoteClass(["citation-graph-status-reading"], "read")).toEqual([
+			NOTE_CLASS,
+			"citation-graph-status-read",
+		]);
+	});
+
+	it("strips a stale status class when no status is given", () => {
 		expect(withNoteClass(["citation-graph-status-reading"])).toEqual([NOTE_CLASS]);
 	});
 
-	it("strips a stale status class but keeps the user's own", () => {
-		expect(withNoteClass(["citation-graph-status-read", "wide-page"])).toEqual([
+	it("keeps the user's own classes", () => {
+		expect(withNoteClass(["citation-graph-status-read", "wide-page"], "abandoned")).toEqual([
 			NOTE_CLASS,
+			"citation-graph-status-abandoned",
 			"wide-page",
 		]);
 	});
@@ -249,65 +270,169 @@ describe("LiteratureNoteManager.getStatus", () => {
 });
 
 describe("LiteratureNoteManager.setStatus", () => {
-	it("writes the status and drops the legacy 'read' field", () => {
+	it("writes the status and drops the legacy 'read' field", async () => {
 		const note = makeNote({ fm: { doi: "10.1000/xyz", read: true } });
-		const manager = new LiteratureNoteManager(note.app, "papers");
-		return manager.setStatus(note.file, "reading").then(() => {
-			expect(note.fm()).toEqual({
-				doi: "10.1000/xyz",
-				status: "reading",
-				cssclasses: [NOTE_CLASS],
-			});
+		await new LiteratureNoteManager(note.app, "papers").setStatus(note.file, "reading");
+		expect(note.fm()).toEqual({
+			doi: "10.1000/xyz",
+			status: "reading",
+			cssclasses: [NOTE_CLASS, "citation-graph-status-reading"],
 		});
 	});
 
-	it("writes no per-status class", async () => {
+	// The stored status, never the displayed one: "annotated" is derived from
+	// the note body, which processFrontMatter's callback cannot read.
+	it("writes the stored status as a class", async () => {
 		const note = makeNote({ fm: { doi: "10.1000/xyz" } });
 		await new LiteratureNoteManager(note.app, "papers").setStatus(note.file, "read");
-		expect(note.fm()?.cssclasses).toEqual([NOTE_CLASS]);
+		expect(note.fm()?.cssclasses).toEqual([NOTE_CLASS, "citation-graph-status-read"]);
 	});
 
-	it("strips a stale status class and keeps the user's own", async () => {
+	it("replaces a stale status class and keeps the user's own", async () => {
 		const note = makeNote({
 			fm: { doi: "10.1000/xyz", cssclasses: ["citation-graph-status-unread", "wide-page"] },
 		});
 		await new LiteratureNoteManager(note.app, "papers").setStatus(note.file, "read");
-		expect(note.fm()?.cssclasses).toEqual([NOTE_CLASS, "wide-page"]);
+		expect(note.fm()?.cssclasses).toEqual([
+			NOTE_CLASS,
+			"citation-graph-status-read",
+			"wide-page",
+		]);
 	});
 
 	it("gives an adopted note the marker class", async () => {
 		const note = makeNote({ fm: { doi: "10.1000/xyz" } });
 		await new LiteratureNoteManager(note.app, "papers").setStatus(note.file, "unread");
-		expect(note.fm()?.cssclasses).toEqual([NOTE_CLASS]);
+		expect(note.fm()?.cssclasses).toEqual([NOTE_CLASS, "citation-graph-status-unread"]);
 	});
 
 	it("normalizes a string cssclasses value and preserves it", async () => {
 		const note = makeNote({ fm: { doi: "10.1000/xyz", cssclasses: "wide-page" } });
 		await new LiteratureNoteManager(note.app, "papers").setStatus(note.file, "unread");
-		expect(note.fm()?.cssclasses).toEqual([NOTE_CLASS, "wide-page"]);
+		expect(note.fm()?.cssclasses).toEqual([
+			NOTE_CLASS,
+			"citation-graph-status-unread",
+			"wide-page",
+		]);
+	});
+});
+
+describe("LiteratureNoteManager.updateStatus", () => {
+	it("hands the callback the stored status and writes its answer", async () => {
+		const note = makeNote({ fm: { doi: "10.1000/xyz", status: "reading" } });
+		const seen: PaperStatus[] = [];
+
+		const written = await new LiteratureNoteManager(note.app, "papers").updateStatus(
+			note.file,
+			(current) => {
+				seen.push(current);
+				return nextStatusInCycle(current);
+			},
+		);
+
+		expect(seen).toEqual(["reading"]);
+		expect(written).toBe("read");
+		expect(note.fm()?.status).toBe("read");
+	});
+
+	it("reads a note with no status at all as unread", async () => {
+		const note = makeNote({ fm: { doi: "10.1000/xyz" } });
+		const seen: PaperStatus[] = [];
+		await new LiteratureNoteManager(note.app, "papers").updateStatus(note.file, (c) => {
+			seen.push(c);
+			return c;
+		});
+		expect(seen).toEqual(["unread"]);
+	});
+
+	it("reads the legacy 'read: true' field as read", async () => {
+		const note = makeNote({ fm: { doi: "10.1000/xyz", read: true } });
+		const seen: PaperStatus[] = [];
+		await new LiteratureNoteManager(note.app, "papers").updateStatus(note.file, (c) => {
+			seen.push(c);
+			return c;
+		});
+		expect(seen).toEqual(["read"]);
+		expect(note.fm()).not.toHaveProperty("read");
+	});
+
+	// The regression this exists for: the cycle command used to read the current
+	// status from metadataCache, which Obsidian had not refreshed yet, so a
+	// second press decided from the status before the first press and the paper
+	// never advanced past the same two values.
+	it("advances every time, even while the metadata cache lags behind", async () => {
+		const note = makeNote({ fm: { doi: "10.1000/xyz", status: "unread" } });
+		const manager = new LiteratureNoteManager(note.app, "papers");
+		note.freezeCache();
+
+		const seen: PaperStatus[] = [];
+		for (let press = 0; press < 3; press++) {
+			seen.push(await manager.updateStatus(note.file, nextStatusInCycle));
+		}
+
+		expect(seen).toEqual(["reading", "read", "unread"]);
 	});
 });
 
 describe("LiteratureNoteManager.syncNoteClass", () => {
-	it("is a no-op when the note is already clean", async () => {
-		const note = makeNote({ fm: { doi: "10.1000/xyz", cssclasses: [NOTE_CLASS] } });
-		const changed = await new LiteratureNoteManager(note.app, "papers").syncNoteClass(note.file);
-		expect(changed).toBe(false);
-	});
-
-	it("rewrites a note carrying a stale status class", async () => {
+	it("is a no-op when the note already carries the right classes", async () => {
 		const note = makeNote({
 			fm: { doi: "10.1000/xyz", cssclasses: [NOTE_CLASS, "citation-graph-status-read"] },
 		});
-		const changed = await new LiteratureNoteManager(note.app, "papers").syncNoteClass(note.file);
-		expect(changed).toBe(true);
-		expect(note.fm()?.cssclasses).toEqual([NOTE_CLASS]);
+		const changed = await new LiteratureNoteManager(note.app, "papers").syncNoteClass(
+			note.file,
+			"read",
+		);
+		expect(changed).toBe(false);
 	});
 
-	it("leaves only the marker class behind", async () => {
+	// The case that makes this method exist: setStatus stored "read", and the
+	// note turns out to have notes written in it, so the canvas says so.
+	it("upgrades a stored status to the derived one", async () => {
+		const note = makeNote({
+			fm: { doi: "10.1000/xyz", cssclasses: [NOTE_CLASS, "citation-graph-status-read"] },
+		});
+		const changed = await new LiteratureNoteManager(note.app, "papers").syncNoteClass(
+			note.file,
+			"annotated",
+		);
+		expect(changed).toBe(true);
+		expect(note.fm()?.cssclasses).toEqual([
+			NOTE_CLASS,
+			"citation-graph-status-annotated",
+		]);
+	});
+
+	it("gives a note with no classes at all the marker and the status", async () => {
 		const note = makeNote({ fm: { doi: "10.1000/xyz" } });
-		await new LiteratureNoteManager(note.app, "papers").syncNoteClass(note.file);
-		expect(note.fm()?.cssclasses).toEqual([NOTE_CLASS]);
+		await new LiteratureNoteManager(note.app, "papers").syncNoteClass(note.file, "abandoned");
+		expect(note.fm()?.cssclasses).toEqual([
+			NOTE_CLASS,
+			"citation-graph-status-abandoned",
+		]);
+	});
+
+	// The regression this exists for: setting a status on a paper that already
+	// had notes written in it left the note saying "Reading" while the canvas
+	// node was painted green for "Read + notes written". syncNoteClass had
+	// compared against the metadata cache, which Obsidian had not yet refreshed
+	// after setStatus wrote, decided nothing needed doing, and skipped the
+	// write that would have corrected the class.
+	it("compares against the note on disk, not the stale metadata cache", async () => {
+		const note = makeNote({
+			fm: { doi: "10.1000/xyz", cssclasses: [NOTE_CLASS, "citation-graph-status-annotated"] },
+		});
+		const manager = new LiteratureNoteManager(note.app, "papers");
+		note.freezeCache();
+
+		await manager.setStatus(note.file, "reading");
+		const changed = await manager.syncNoteClass(note.file, "annotated");
+
+		expect(changed).toBe(true);
+		expect(note.fm()?.cssclasses).toEqual([
+			NOTE_CLASS,
+			"citation-graph-status-annotated",
+		]);
 	});
 });
 
@@ -340,8 +465,16 @@ describe("LiteratureNoteManager.displayStatusFor", () => {
 		expect(await displayStatus({ status: "read" }, scaffold({ notes: "good" }))).toBe("annotated");
 	});
 
-	it("derives 'annotated' from an unread note carrying notes", async () => {
-		expect(await displayStatus({ status: "unread" }, scaffold({ notes: "good" }))).toBe("annotated");
+	// "Read + notes written" has to mean both. Deriving it from the body alone
+	// labelled papers that had never been opened, because the plugin's own
+	// Write summary puts content in the note, and it froze the reading list:
+	// cycling a summarised paper never changed what the canvas showed.
+	it("leaves an unread note carrying notes unread", async () => {
+		expect(await displayStatus({ status: "unread" }, scaffold({ notes: "good" }))).toBe("unread");
+	});
+
+	it("leaves a reading note carrying notes on 'reading'", async () => {
+		expect(await displayStatus({ status: "reading" }, scaffold({ notes: "good" }))).toBe("reading");
 	});
 
 	it("keeps an abandoned note abandoned even when it carries notes", async () => {
