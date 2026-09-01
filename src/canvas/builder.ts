@@ -1,4 +1,5 @@
 import type { Paper, CitationEdge, CitationGraph, CanvasData, CanvasEdge } from "../types";
+import { logOnly } from "../log";
 import { layoutPapers, layoutNewPapers, paperNodeId, hasPaperNode, resolvePaperNodeId } from "./layout";
 
 /**
@@ -92,34 +93,77 @@ export function expandCanvas(
     ...newNodes.map((n) => n.id),
   ]);
 
-  // Map S2 IDs → paper node IDs. Resolved against the IDs actually present so
-  // an edge endpoint lands on the existing node rather than on a current-scheme
-  // ID that no node carries.
-  const s2ToNodeId = new Map<string, string>();
+  const addedEdges = resolveNewEdges(
+    existingCanvas.edges,
+    allNodeIds,
+    newEdges,
+    allPapers
+  );
+
+  return {
+    nodes: [...updatedExisting, ...newNodes],
+    edges: [...existingCanvas.edges, ...addedEdges],
+  };
+}
+
+/**
+ * Turn citation edges into canvas edges against a fixed set of nodes, dropping
+ * the ones already drawn and the ones whose endpoints are not on the canvas.
+ *
+ * Kept separate from `expandCanvas` because an edges-only sync must leave the
+ * nodes untouched: `layoutNewPapers` rebuilds the whole year layout, which
+ * would throw away every hand-placed position, and losing manual positioning
+ * is what *Canvas: relayout* asks for confirmation before doing.
+ */
+export function resolveNewEdges(
+  existingEdges: CanvasEdge[],
+  nodeIds: Set<string>,
+  newEdges: CitationEdge[],
+  allPapers: Map<string, Paper>
+): CanvasEdge[] {
+  // Map paper identifiers → paper node IDs. Resolved against the IDs actually
+  // present so an edge endpoint lands on the existing node rather than on a
+  // current-scheme ID that no node carries.
+  const idToNodeId = new Map<string, string>();
   for (const paper of allPapers.values()) {
-    const nodeId = resolvePaperNodeId(paper, allNodeIds);
+    const nodeId = resolvePaperNodeId(paper, nodeIds);
     if (paper.semanticScholarId) {
-      s2ToNodeId.set(paper.semanticScholarId, nodeId);
+      idToNodeId.set(paper.semanticScholarId, nodeId);
     }
-    s2ToNodeId.set(paper.id, nodeId);
+    idToNodeId.set(paper.id, nodeId);
   }
 
-  // Add new edges
-  const existingEdgeKeys = new Set(
-    existingCanvas.edges.map((e) => `${e.fromNode}->${e.toNode}`)
+  const seenEdgeKeys = new Set(
+    existingEdges.map((e) => `${e.fromNode}->${e.toNode}`)
   );
 
   const addedEdges: CanvasEdge[] = [];
   for (const edge of newEdges) {
-    const fromNodeId = s2ToNodeId.get(edge.fromId);
-    const toNodeId = s2ToNodeId.get(edge.toId);
+    const fromNodeId = idToNodeId.get(edge.fromId);
+    const toNodeId = idToNodeId.get(edge.toId);
 
-    if (!fromNodeId || !toNodeId) continue;
-    if (!allNodeIds.has(fromNodeId) || !allNodeIds.has(toNodeId)) continue;
+    // An endpoint naming an identifier no paper is indexed under means the
+    // caller built the edge from a different id scheme than the papers it
+    // passed. The arrow just goes missing on the canvas, so say so in the log
+    // rather than dropping it in silence.
+    if (!fromNodeId || !toNodeId) {
+      logOnly(
+        `Dropped citation edge ${edge.fromId} -> ${edge.toId}: ` +
+          `${!fromNodeId ? "source" : "target"} paper is not on the canvas.`
+      );
+      continue;
+    }
+    if (!nodeIds.has(fromNodeId) || !nodeIds.has(toNodeId)) {
+      logOnly(
+        `Dropped citation edge ${edge.fromId} -> ${edge.toId}: ` +
+          `resolved to node id not present on the canvas.`
+      );
+      continue;
+    }
 
     const edgeKey = `${fromNodeId}->${toNodeId}`;
-    if (existingEdgeKeys.has(edgeKey)) continue;
-    existingEdgeKeys.add(edgeKey);
+    if (seenEdgeKeys.has(edgeKey)) continue;
+    seenEdgeKeys.add(edgeKey);
 
     addedEdges.push({
       id: `edge-${edgeKey}`,
@@ -131,8 +175,5 @@ export function expandCanvas(
     });
   }
 
-  return {
-    nodes: [...updatedExisting, ...newNodes],
-    edges: [...existingCanvas.edges, ...addedEdges],
-  };
+  return addedEdges;
 }

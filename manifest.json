@@ -1,7 +1,7 @@
 {
   "id": "citation-graph",
   "name": "Citation Graph",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "minAppVersion": "1.4.0",
   "description": "Build citation graph canvases from Zotero collections, with literature notes and reference expansion via Semantic Scholar.",
   "author": "landaus",

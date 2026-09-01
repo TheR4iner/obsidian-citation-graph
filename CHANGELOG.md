@@ -6,6 +6,26 @@ Each released version here is also the body of the matching [GitHub release](htt
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-09-01
+
+### Added
+
+- **Canvas: resolve missing citation edges**: re-checks every paper on the canvas against the citation sources and draws each edge whose two endpoints are both already present. Nodes are never moved, so hand-placed positions survive, and an edge already drawn is left alone, so the command is safe to re-run. It is the way to fill in arrows a canvas is missing between papers that arrived by separate routes, which *Expand paper* cannot do: it lists an already-present paper with its row disabled. **(force refresh)** re-queries every paper instead of reusing cached reference data. The closing notice reports edges added, papers served from the cache, papers no source had citation data for, and papers carrying no identifier to look up; the titles behind the last two go to `citation-graph.log`.
+
+- Paper pickers now unfold a full abstract on request: rows still show the first 200 characters, and a **Show more** link next to the cut opens the rest in place (**Show less** folds it back). Every picker gains this, so the abstracts in *Expand paper*, *Recommend papers* and the rest can be read without leaving the dialog. An unfolded abstract stays open while you type in the search box or mark a paper uninteresting.
+
+### Changed
+
+- *Add paper by DOI or arXiv ID* no longer asks whether to write an LLM summary once the paper is on the canvas, and no longer suggests configuring an LLM when none is set up. Summarising is a paid call on a paper you may not have decided to read yet, so it now happens only when you ask for it: run *Write summary* from the command palette, or from a paper node's right-click menu.
+
+### Fixed
+
+- *Expand paper* now draws the citation edge for a paper whose metadata came from OpenAlex, arXiv or Crossref rather than Semantic Scholar. Such a paper was added to the canvas as a node and a note, but its arrow to the expanded paper was dropped without a word, so the two sat side by side unconnected.
+- *Expand paper* now also connects the expanded paper to papers already on the canvas that cite it or that it cites. Previously an expansion only drew edges to the papers it added in that run, so a reference that arrived on an earlier run stayed unlinked with no way to link it: the picker lists it as already present and will not let you tick it again. Re-running *Expand paper* on a node now fills in its missing arrows.
+- A citation edge that cannot be matched to a node is recorded in `citation-graph.log` with both of its endpoints instead of vanishing silently.
+- Every canvas command now works on a canvas Obsidian has just created. Such a canvas is an empty file on disk, which the plugin could not read: *Add paper by DOI or arXiv ID*, *Send papers to another canvas* and the rest all failed with `Unexpected end of JSON input`. Adding a paper to a blank canvas now simply adds it, and the commands that need papers say so plainly instead of reporting a parse error. A canvas whose contents are genuinely corrupt still reports an error, now naming the file.
+- A canvas populated only with *Add paper by DOI or arXiv ID*, never created from a Zotero collection or tag, is now recognised as a citation graph canvas: it takes its name from the file, so *Send papers to another canvas* and *Sync canvas to Zotero* accept it instead of refusing it.
+
 ## [0.2.1] - 2026-08-27
 
 ### Added
@@ -53,7 +73,8 @@ First public release.
 - **Sync canvas to Zotero**, **Send papers to canvas**, **Relayout canvas**, **Delete paper**, and **Clear Semantic Scholar cache**.
 - Settings for the collections folder, the Zotero and Semantic Scholar API keys, node size, the five status colours, and the full LLM configuration.
 
-[Unreleased]: https://github.com/TheR4iner/obsidian-citation-graph/compare/0.2.1...HEAD
+[Unreleased]: https://github.com/TheR4iner/obsidian-citation-graph/compare/0.3.0...HEAD
+[0.3.0]: https://github.com/TheR4iner/obsidian-citation-graph/compare/0.2.1...0.3.0
 [0.2.1]: https://github.com/TheR4iner/obsidian-citation-graph/compare/0.2.0...0.2.1
 [0.2.0]: https://github.com/TheR4iner/obsidian-citation-graph/compare/0.1.0...0.2.0
 [0.1.0]: https://github.com/TheR4iner/obsidian-citation-graph/releases/tag/0.1.0

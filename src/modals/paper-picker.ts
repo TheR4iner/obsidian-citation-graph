@@ -17,6 +17,14 @@ export interface PickerResult<C extends PaperChoice> {
   banned: C[];
 }
 
+/** How much of an abstract a row shows before the "Show more" toggle. */
+const ABSTRACT_PREVIEW_LENGTH = 200;
+
+/** Identifies a row for the unfolded-abstract set; titles stand in for papers with no id. */
+function abstractKey(paper: S2Paper): string {
+  return paper.paperId || paper.title || "";
+}
+
 /**
  * Shared modal for choosing papers to add to a canvas: a scrollable checkbox
  * list with a text search, a year range, per-row ban buttons, and a live count.
@@ -30,6 +38,8 @@ export abstract class PaperPickerModal<C extends PaperChoice> extends Modal {
   protected searchQuery = "";
   protected yearMin = "";
   protected yearMax = "";
+  /** Rows whose abstract the user has unfolded, kept across re-renders. */
+  private expandedAbstracts = new Set<string>();
   private listEl: HTMLElement | null = null;
   private countEl: HTMLElement | null = null;
   private resolvePromise: ((result: PickerResult<C>) => void) | null = null;
@@ -213,14 +223,7 @@ export abstract class PaperPickerModal<C extends PaperChoice> extends Modal {
 
       this.renderRowDetails(info, choice);
 
-      if (choice.paper.abstract) {
-        const abs = info.createDiv("citation-graph-paper-abstract");
-        abs.setText(
-          choice.paper.abstract.length > 200
-            ? choice.paper.abstract.slice(0, 200) + "…"
-            : choice.paper.abstract
-        );
-      }
+      this.renderAbstract(info, choice);
 
       const rightActions = row.createDiv("citation-graph-row-actions");
       this.renderRowBadges(rightActions, choice);
@@ -240,11 +243,49 @@ export abstract class PaperPickerModal<C extends PaperChoice> extends Modal {
     }
   }
 
+  /**
+   * Abstract for one row, shortened to a readable preview with a toggle that
+   * unfolds the full text in place. The unfolded state is keyed by paper so a
+   * search keystroke or a ban, both of which rebuild the list, do not fold the
+   * abstract the user was reading back up.
+   */
+  private renderAbstract(info: HTMLElement, choice: C): void {
+    const abstract = choice.paper.abstract;
+    if (!abstract) return;
+
+    const abs = info.createDiv("citation-graph-paper-abstract");
+
+    if (abstract.length <= ABSTRACT_PREVIEW_LENGTH) {
+      abs.setText(abstract);
+      return;
+    }
+
+    const key = abstractKey(choice.paper);
+    const expanded = this.expandedAbstracts.has(key);
+    abs.createSpan({
+      text: expanded ? abstract : abstract.slice(0, ABSTRACT_PREVIEW_LENGTH).trimEnd() + "…",
+    });
+
+    const toggle = abs.createEl("button", {
+      cls: "citation-graph-abstract-toggle",
+      text: expanded ? "Show less" : "Show more",
+    });
+    toggle.addEventListener("click", (event) => {
+      // The row is not a control itself, but keep the click off any parent
+      // handler a subclass may add later.
+      event.stopPropagation();
+      if (expanded) this.expandedAbstracts.delete(key);
+      else this.expandedAbstracts.add(key);
+      this.renderList();
+    });
+  }
+
   onClose(): void {
     if (this.resolvePromise) {
       this.resolvePromise({ selected: [], banned: [] });
       this.resolvePromise = null;
     }
+    this.expandedAbstracts.clear();
     this.countEl = null;
     this.listEl = null;
     this.contentEl.empty();
