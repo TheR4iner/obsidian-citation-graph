@@ -6,6 +6,8 @@ Each released version here is also the body of the matching [GitHub release](htt
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-09-01
+
 ### Added
 
 - **Canvas: resolve missing citation edges**: re-checks every paper on the canvas against the citation sources and draws each edge whose two endpoints are both already present. Nodes are never moved, so hand-placed positions survive, and an edge already drawn is left alone, so the command is safe to re-run. It is the way to fill in arrows a canvas is missing between papers that arrived by separate routes, which *Expand paper* cannot do: it lists an already-present paper with its row disabled. **(force refresh)** re-queries every paper instead of reusing cached reference data. The closing notice reports edges added, papers served from the cache, papers no source had citation data for, and papers carrying no identifier to look up; the titles behind the last two go to `citation-graph.log`.
@@ -71,7 +73,8 @@ First public release.
 - **Sync canvas to Zotero**, **Send papers to canvas**, **Relayout canvas**, **Delete paper**, and **Clear Semantic Scholar cache**.
 - Settings for the collections folder, the Zotero and Semantic Scholar API keys, node size, the five status colours, and the full LLM configuration.
 
-[Unreleased]: https://github.com/TheR4iner/obsidian-citation-graph/compare/0.2.1...HEAD
+[Unreleased]: https://github.com/TheR4iner/obsidian-citation-graph/compare/0.3.0...HEAD
+[0.3.0]: https://github.com/TheR4iner/obsidian-citation-graph/compare/0.2.1...0.3.0
 [0.2.1]: https://github.com/TheR4iner/obsidian-citation-graph/compare/0.2.0...0.2.1
 [0.2.0]: https://github.com/TheR4iner/obsidian-citation-graph/compare/0.1.0...0.2.0
 [0.1.0]: https://github.com/TheR4iner/obsidian-citation-graph/releases/tag/0.1.0
