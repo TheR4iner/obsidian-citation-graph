@@ -6,6 +6,8 @@ Each released version here is also the body of the matching [GitHub release](htt
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-09-01
+
 ### Fixed
 
 - Cycling the reading status of a paper that has a summary or notes in it now works. Such a paper was labelled *Read + notes written* whatever its actual status, so cycling it appeared to do nothing, or to flip between two labels at random. Two separate causes: *Read + notes written* was derived from the note's content alone, which meant the plugin's own *Write summary* silently marked papers as read; and the cycle read the current status from Obsidian's metadata cache, which lags behind writes, so a second press could decide from the status before the first press.
@@ -104,7 +106,8 @@ First public release.
 - **Sync canvas to Zotero**, **Send papers to canvas**, **Relayout canvas**, **Delete paper**, and **Clear Semantic Scholar cache**.
 - Settings for the collections folder, the Zotero and Semantic Scholar API keys, node size, the five status colours, and the full LLM configuration.
 
-[Unreleased]: https://github.com/TheR4iner/obsidian-citation-graph/compare/0.4.0...HEAD
+[Unreleased]: https://github.com/TheR4iner/obsidian-citation-graph/compare/0.5.0...HEAD
+[0.5.0]: https://github.com/TheR4iner/obsidian-citation-graph/compare/0.4.0...0.5.0
 [0.4.0]: https://github.com/TheR4iner/obsidian-citation-graph/compare/0.3.0...0.4.0
 [0.3.0]: https://github.com/TheR4iner/obsidian-citation-graph/compare/0.2.1...0.3.0
 [0.2.1]: https://github.com/TheR4iner/obsidian-citation-graph/compare/0.2.0...0.2.1
