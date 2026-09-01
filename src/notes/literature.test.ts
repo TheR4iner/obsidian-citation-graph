@@ -135,15 +135,35 @@ describe("readFrontmatterArxiv", () => {
 });
 
 describe("withNoteClass", () => {
-	it("writes no per-status class", () => {
-		// Status comes from the canvas node colour now, not a cssclass.
+	it("writes the status it is given as a class", () => {
+		expect(withNoteClass([], "reading")).toEqual([
+			NOTE_CLASS,
+			"citation-graph-status-reading",
+		]);
+	});
+
+	it("writes no status class when none is given", () => {
 		expect(withNoteClass([])).toEqual([NOTE_CLASS]);
+		expect(withNoteClass([], null)).toEqual([NOTE_CLASS]);
+	});
+
+	// A paper carries at most one status class, or the stylesheet would apply
+	// two labels to the same node and the later rule would win by accident.
+	it("replaces a stale status class rather than adding to it", () => {
+		expect(withNoteClass(["citation-graph-status-reading"], "read")).toEqual([
+			NOTE_CLASS,
+			"citation-graph-status-read",
+		]);
+	});
+
+	it("strips a stale status class when no status is given", () => {
 		expect(withNoteClass(["citation-graph-status-reading"])).toEqual([NOTE_CLASS]);
 	});
 
-	it("strips a stale status class but keeps the user's own", () => {
-		expect(withNoteClass(["citation-graph-status-read", "wide-page"])).toEqual([
+	it("keeps the user's own classes", () => {
+		expect(withNoteClass(["citation-graph-status-read", "wide-page"], "abandoned")).toEqual([
 			NOTE_CLASS,
+			"citation-graph-status-abandoned",
 			"wide-page",
 		]);
 	});
@@ -249,65 +269,89 @@ describe("LiteratureNoteManager.getStatus", () => {
 });
 
 describe("LiteratureNoteManager.setStatus", () => {
-	it("writes the status and drops the legacy 'read' field", () => {
+	it("writes the status and drops the legacy 'read' field", async () => {
 		const note = makeNote({ fm: { doi: "10.1000/xyz", read: true } });
-		const manager = new LiteratureNoteManager(note.app, "papers");
-		return manager.setStatus(note.file, "reading").then(() => {
-			expect(note.fm()).toEqual({
-				doi: "10.1000/xyz",
-				status: "reading",
-				cssclasses: [NOTE_CLASS],
-			});
+		await new LiteratureNoteManager(note.app, "papers").setStatus(note.file, "reading");
+		expect(note.fm()).toEqual({
+			doi: "10.1000/xyz",
+			status: "reading",
+			cssclasses: [NOTE_CLASS, "citation-graph-status-reading"],
 		});
 	});
 
-	it("writes no per-status class", async () => {
+	// The stored status, never the displayed one: "annotated" is derived from
+	// the note body, which processFrontMatter's callback cannot read.
+	it("writes the stored status as a class", async () => {
 		const note = makeNote({ fm: { doi: "10.1000/xyz" } });
 		await new LiteratureNoteManager(note.app, "papers").setStatus(note.file, "read");
-		expect(note.fm()?.cssclasses).toEqual([NOTE_CLASS]);
+		expect(note.fm()?.cssclasses).toEqual([NOTE_CLASS, "citation-graph-status-read"]);
 	});
 
-	it("strips a stale status class and keeps the user's own", async () => {
+	it("replaces a stale status class and keeps the user's own", async () => {
 		const note = makeNote({
 			fm: { doi: "10.1000/xyz", cssclasses: ["citation-graph-status-unread", "wide-page"] },
 		});
 		await new LiteratureNoteManager(note.app, "papers").setStatus(note.file, "read");
-		expect(note.fm()?.cssclasses).toEqual([NOTE_CLASS, "wide-page"]);
+		expect(note.fm()?.cssclasses).toEqual([
+			NOTE_CLASS,
+			"citation-graph-status-read",
+			"wide-page",
+		]);
 	});
 
 	it("gives an adopted note the marker class", async () => {
 		const note = makeNote({ fm: { doi: "10.1000/xyz" } });
 		await new LiteratureNoteManager(note.app, "papers").setStatus(note.file, "unread");
-		expect(note.fm()?.cssclasses).toEqual([NOTE_CLASS]);
+		expect(note.fm()?.cssclasses).toEqual([NOTE_CLASS, "citation-graph-status-unread"]);
 	});
 
 	it("normalizes a string cssclasses value and preserves it", async () => {
 		const note = makeNote({ fm: { doi: "10.1000/xyz", cssclasses: "wide-page" } });
 		await new LiteratureNoteManager(note.app, "papers").setStatus(note.file, "unread");
-		expect(note.fm()?.cssclasses).toEqual([NOTE_CLASS, "wide-page"]);
+		expect(note.fm()?.cssclasses).toEqual([
+			NOTE_CLASS,
+			"citation-graph-status-unread",
+			"wide-page",
+		]);
 	});
 });
 
 describe("LiteratureNoteManager.syncNoteClass", () => {
-	it("is a no-op when the note is already clean", async () => {
-		const note = makeNote({ fm: { doi: "10.1000/xyz", cssclasses: [NOTE_CLASS] } });
-		const changed = await new LiteratureNoteManager(note.app, "papers").syncNoteClass(note.file);
-		expect(changed).toBe(false);
-	});
-
-	it("rewrites a note carrying a stale status class", async () => {
+	it("is a no-op when the note already carries the right classes", async () => {
 		const note = makeNote({
 			fm: { doi: "10.1000/xyz", cssclasses: [NOTE_CLASS, "citation-graph-status-read"] },
 		});
-		const changed = await new LiteratureNoteManager(note.app, "papers").syncNoteClass(note.file);
-		expect(changed).toBe(true);
-		expect(note.fm()?.cssclasses).toEqual([NOTE_CLASS]);
+		const changed = await new LiteratureNoteManager(note.app, "papers").syncNoteClass(
+			note.file,
+			"read",
+		);
+		expect(changed).toBe(false);
 	});
 
-	it("leaves only the marker class behind", async () => {
+	// The case that makes this method exist: setStatus stored "read", and the
+	// note turns out to have notes written in it, so the canvas says so.
+	it("upgrades a stored status to the derived one", async () => {
+		const note = makeNote({
+			fm: { doi: "10.1000/xyz", cssclasses: [NOTE_CLASS, "citation-graph-status-read"] },
+		});
+		const changed = await new LiteratureNoteManager(note.app, "papers").syncNoteClass(
+			note.file,
+			"annotated",
+		);
+		expect(changed).toBe(true);
+		expect(note.fm()?.cssclasses).toEqual([
+			NOTE_CLASS,
+			"citation-graph-status-annotated",
+		]);
+	});
+
+	it("gives a note with no classes at all the marker and the status", async () => {
 		const note = makeNote({ fm: { doi: "10.1000/xyz" } });
-		await new LiteratureNoteManager(note.app, "papers").syncNoteClass(note.file);
-		expect(note.fm()?.cssclasses).toEqual([NOTE_CLASS]);
+		await new LiteratureNoteManager(note.app, "papers").syncNoteClass(note.file, "abandoned");
+		expect(note.fm()?.cssclasses).toEqual([
+			NOTE_CLASS,
+			"citation-graph-status-abandoned",
+		]);
 	});
 });
 

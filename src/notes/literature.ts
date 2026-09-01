@@ -284,7 +284,7 @@ ${paper.arxiv ? `**arXiv**: [${escapeNoteText(paper.arxiv)}](https://arxiv.org/a
       fm.citekey = paper.citekey || null;
       fm.semantic_scholar_id = paper.semanticScholarId || null;
       fm.status = "unread" satisfies PaperStatus;
-      fm.cssclasses = [NOTE_CLASS];
+      fm.cssclasses = withNoteClass(fm.cssclasses, "unread");
     });
     paper.notePath = path;
     // Keep the index current so later papers in the same batch see this note
@@ -421,24 +421,27 @@ ${paper.arxiv ? `**arXiv**: [${escapeNoteText(paper.arxiv)}](https://arxiv.org/a
     await this.app.fileManager.processFrontMatter(file, (fm) => {
       fm.status = status;
       if ("read" in fm) delete fm.read;
-      fm.cssclasses = withNoteClass(fm.cssclasses);
+      // The stored status, not the displayed one: "annotated" is derived from
+      // the note body, which cannot be read from inside this callback. A
+      // caller that needs the distinction follows up with syncNoteClass.
+      fm.cssclasses = withNoteClass(fm.cssclasses, status);
     });
   }
 
   /**
-   * Ensure a note carries the marker class and no stale per-status classes.
-   * Writes only when something would actually change, so it is a no-op once
-   * a note is clean.
+   * Bring a note's cssclasses in step with the status it is being painted
+   * with: the marker class that tells a paper from one of the user's own
+   * notes, and one status class for the canvas stylesheet to key off.
    *
-   * The marker is how the canvas stylesheet tells a paper from one of the
-   * user's own notes sharing the canvas. Unlike the per-status classes it
-   * cleans up, it is written once at creation and never varies with status.
+   * Writes only when something would actually change, so it is a no-op once a
+   * note is clean, and it rides along with the file read the caller is doing
+   * anyway rather than costing a lookup of its own.
    */
-  async syncNoteClass(file: TFile): Promise<boolean> {
+  async syncNoteClass(file: TFile, status?: DisplayStatus | null): Promise<boolean> {
     const current = normalizeCssClasses(
       this.app.metadataCache.getFileCache(file)?.frontmatter?.cssclasses
     );
-    const next = withNoteClass(current);
+    const next = withNoteClass(current, status);
     if (current.length === next.length && current.every((c, i) => c === next[i])) {
       return false;
     }
@@ -464,19 +467,30 @@ ${paper.arxiv ? `**arXiv**: [${escapeNoteText(paper.arxiv)}](https://arxiv.org/a
 }
 
 /**
- * Rewrite a note's cssclasses so it carries exactly the marker class and one
- * status class, preserving any classes the user added themselves.
+ * Rewrite a note's cssclasses so it carries exactly the marker class and, when
+ * one is given, exactly one status class, preserving any classes the user
+ * added themselves.
  *
  * NOTE_CLASS is ensured rather than assumed: a note the plugin adopted from
  * the vault rather than created would otherwise miss the canvas styling and
  * keep Obsidian's default washed rendering while every sibling shows a
  * status border.
+ *
+ * The status class is what `styles.css` reads to write the label along a
+ * node's bottom edge and to dash and fade an abandoned paper. Colour is not
+ * involved: that stays the canvas file's business, so the two are free to be
+ * configured independently and a custom colour styles exactly like a preset.
+ * Any stale status class is dropped, so a paper carries at most one.
  */
-export function withNoteClass(existing: unknown): string[] {
+export function withNoteClass(
+  existing: unknown,
+  status?: DisplayStatus | null
+): string[] {
   const others = normalizeCssClasses(existing).filter(
     (c) => c !== NOTE_CLASS && !c.startsWith(STATUS_CLASS_PREFIX)
   );
-  return [NOTE_CLASS, ...others];
+  const statusClass = status ? [`${STATUS_CLASS_PREFIX}${status}`] : [];
+  return [NOTE_CLASS, ...statusClass, ...others];
 }
 
 /**

@@ -289,7 +289,7 @@ The provider chosen here is also the one *Recommend papers* uses.
 
 The colour is applied to the node's **border only**, a 3px frame at full strength with Obsidian's tinted interior removed, and the status is spelled out along the bottom edge in the same colour (pictured under [Reading status](#reading-status)). Obsidian's default treatment (a 1px border at 40% opacity plus a 7% wash) is too weak to separate similar colours and tints the note's text for no benefit; at full strength on the border alone, the closest pair of statuses is roughly three times easier to tell apart.
 
-The label is derived from the node's colour rather than stored alongside it, which keeps the `.canvas` file the single source of truth. One consequence: **two statuses sharing a colour cannot be told apart**, and the settings tab warns you when that happens.
+Colour and label are drawn from different places. The colour lives on the canvas node, where Obsidian renders it; the label, the thicker frame and the fade on an abandoned paper come from a `citation-graph-status-*` class the plugin writes into the note, which `styles.css` styles. So two statuses sharing a colour still read differently, by their labels, though the settings tab points the clash out because the colours themselves stop carrying meaning. It also means a CSS snippet can restyle any status without touching the plugin.
 
 Each colour is one of Obsidian's six presets, *No colour*, or a custom `#rrggbb` value. Presets follow your theme's `--color-*` variables; a hex value is fixed and will not adapt between light and dark mode, which is the trade-off for matching a theme that does not define those variables.
 
@@ -309,12 +309,15 @@ semantic_scholar_id: "204e3073870fae3d05bcbc2f6a8e263d9b72e776"
 status: unread
 cssclasses:
   - citation-graph-note
+  - citation-graph-status-unread
 ---
 ```
 
 The body carries a title heading, an author/year/DOI/arXiv block, a `## Summary` section written by *Write summary*, and a `## Notes` section for you.
 
 `status` holds one of `unread`, `reading`, `read` or `abandoned`, which the interface labels *To read*, *Reading*, *Read* and *Abandoned*. *Read + notes written* has no stored value: it is derived from the note's body.
+
+`cssclasses` carries `citation-graph-note`, which marks the note as a paper, and one `citation-graph-status-*` class the canvas styling reads. Both are rewritten whenever the plugin paints a canvas, so edit `status` rather than the class; any classes of your own are left where they are.
 
 ## How it works
 

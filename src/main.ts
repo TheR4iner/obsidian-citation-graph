@@ -33,7 +33,6 @@ import {
   wasTruncated,
   STATUS_LABELS,
 } from "./types";
-import { statusStyleRules } from "./canvas/status-styles";
 import { CitationGraphSettingTab } from "./settings";
 import { ZoteroClient } from "./api/zotero";
 import { SemanticScholarClient } from "./api/semantic-scholar";
@@ -166,9 +165,6 @@ function addBannedPapers(canvas: CanvasMeta, additions: BannedPaper[]): number {
 }
 
 export default class CitationGraphPlugin extends Plugin {
-  /** Runtime stylesheet mapping canvas node colours to reading statuses. */
-  private statusStyleEl: HTMLStyleElement | null = null;
-
   settings: CitationGraphSettings = DEFAULT_SETTINGS;
   s2Cache!: S2RefCache;
   // External-API clients are created once at load so their rate-limit state
@@ -180,7 +176,6 @@ export default class CitationGraphPlugin extends Plugin {
 
   async onload(): Promise<void> {
     await this.loadSettings();
-    this.applyStatusStyles();
     this.addSettingTab(new CitationGraphSettingTab(this.app, this));
 
     initLog(this.app.vault.adapter, this.pluginDir);
@@ -386,11 +381,6 @@ export default class CitationGraphPlugin extends Plugin {
     ]);
   }
 
-  onunload(): void {
-    this.statusStyleEl?.remove();
-    this.statusStyleEl = null;
-  }
-
   /**
    * This plugin's own folder, as a vault-relative path, holding the reference
    * cache and the log file.
@@ -512,7 +502,6 @@ export default class CitationGraphPlugin extends Plugin {
 
   async saveSettings(): Promise<void> {
     await this.saveData(this.settings);
-    this.applyStatusStyles();
     this.applyApiCredentials();
   }
 
@@ -528,35 +517,6 @@ export default class CitationGraphPlugin extends Plugin {
     this.s2Client.setApiKey(resolved.semanticScholarApiKey);
     this.openAlexClient.setEmail(this.settings.openAlexEmail);
     this.crossRefClient.setEmail(this.settings.openAlexEmail);
-  }
-
-  /**
-   * Rebuild the small stylesheet that says which node colour means which
-   * reading status.
-   *
-   * Status reaches the canvas as `color` in the .canvas file, which Obsidian
-   * turns into a class and a colour on each node. Reading the status back off
-   * that keeps the canvas file the single source of truth. The alternative, a
-   * per-status cssclass in the note's frontmatter, meant the same fact was
-   * stored twice and had to be kept in step, and it resolved through
-   * Obsidian's file lookup -- which silently picks the wrong note when two
-   * filenames differ only in case.
-   *
-   * The sheet holds nothing but that mapping: each rule assigns the custom
-   * properties `styles.css` reads, and every length, colour and opacity stays
-   * there where a theme or snippet can reach it. It has to be generated at all
-   * only because which colour means which status is the user's choice, and a
-   * static stylesheet cannot know it. Obsidian offers no API for a stylesheet
-   * whose contents change, so the element is managed by hand and removed again
-   * in `onunload`.
-   */
-  applyStatusStyles(): void {
-    if (!this.statusStyleEl) {
-      this.statusStyleEl = document.createElement("style");
-      this.statusStyleEl.id = "citation-graph-status-colors";
-      document.head.appendChild(this.statusStyleEl);
-    }
-    this.statusStyleEl.textContent = statusStyleRules(this.settings);
   }
 
   // ─── Create from Collection ─────────────────────────────────
@@ -2197,6 +2157,9 @@ export default class CitationGraphPlugin extends Plugin {
       updated++;
 
       const display: DisplayStatus = await noteManager.displayStatusFor(noteFile, written);
+      // setStatus wrote the stored status; this upgrades the class to
+      // "annotated" when the note body says so, matching the colour below.
+      await noteManager.syncNoteClass(noteFile, display);
       colors.set(filePath, statusColor(this.settings, display));
     }
 
@@ -2380,10 +2343,10 @@ export default class CitationGraphPlugin extends Plugin {
         if (!noteManager.isPaperNote(noteFile)) return;
         const display = await noteManager.getDisplayStatus(noteFile);
         colors.set(notePath, statusColor(this.settings, display));
-        // The label follows the colour, so nothing else needs writing. This
-        // only ensures the marker class and clears stale per-status classes,
-        // and is a no-op once a note is clean.
-        await noteManager.syncNoteClass(noteFile);
+        // The status class rides along with the read this loop is already
+        // doing. It is what draws the label and the frame; the colour in the
+        // map below is what paints the node. A no-op once a note is clean.
+        await noteManager.syncNoteClass(noteFile, display);
       })
     );
 
