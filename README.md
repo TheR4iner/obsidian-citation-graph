@@ -69,9 +69,17 @@ Nothing here happens without you running a command, and nothing is collected abo
 | `api.zotero.org` | *Sync canvas to Zotero* | Paper metadata, plus your Zotero API key |
 | `api.anthropic.com`, `api.openai.com`, `generativelanguage.googleapis.com` | *Write summary*, *Recommend papers* | The paper's PDF, or the canvas's titles, authors, years and identifiers; abstracts only if you tick *Include abstracts* |
 
-**Files outside your vault.** PDFs are not notes, so they are not kept in the vault. *Download* writes them to the folder you name, and *Write summary* reads them back from it to send to a model. The plugin touches no other path. It also writes its own log and reference cache inside its plugin folder, which lives in your vault's configuration directory.
+**Files outside your vault.** PDFs are not notes, so they are not kept in the vault. *Download* writes them to the folder you name, and *Write summary* reads them back from it to send to a model. It also writes its own log and reference cache inside its plugin folder, which lives in your vault's configuration directory.
 
-**A local process.** If you choose the *Claude CLI* provider, *Write summary* and *Recommend papers* run the `claude` binary already installed on your machine, at the path you configure. Nothing is downloaded or installed for you, ever.
+Nothing else is reachable, and that is enforced rather than intended. Every path outside the vault is built in one place (`src/paper-files.ts`) and has to resolve inside a folder you named, in the *Default download path* setting or in a canvas's own download folder. A filename that would escape its folder is refused before anything is opened. That check exists because the names are not the plugin's to trust: a paper's title, its authors and its arXiv ID all arrive from a remote service and end up in filenames.
+
+Inside your vault, the plugin reads the list of files to find literature notes by their identifiers and to offer you other canvases. It reads and writes the notes and canvases it manages, and leaves the rest alone.
+
+**A local process.** If you choose the *Claude CLI* provider, *Write summary* and *Recommend papers* run the `claude` binary already installed on your machine, at the path you configure. Nothing is downloaded or installed for you, ever. It is the only program the plugin runs, and it is constrained three ways:
+
+- **No shell.** The binary is launched directly with an argument list, so nothing in a prompt or a paper title can become a command. The configured path is checked first: it must be an absolute path to a file that exists, or the bare name `claude`.
+- **A curated environment.** A child process normally inherits every variable in the one that started it, which here would hand a third-party binary every secret you have exported: your Zotero key, your OpenAI key, whatever else is in the shell Obsidian was launched from. It is given what it needs to run and find its own configuration (`PATH`, `HOME`, the temporary directory, `ANTHROPIC_*` and `CLAUDE_*`) and nothing else.
+- **A time limit.** The run is capped, so a hung CLI cannot sit there indefinitely.
 
 **Costs.** The plugin is free, and so is everything it needs to build a canvas. *Write summary* and *Recommend papers* are the exception: they call Anthropic, OpenAI or Google under your own account, and those providers bill you per call. Without a key there are no summaries and no recommendations; every other feature works without one.
 

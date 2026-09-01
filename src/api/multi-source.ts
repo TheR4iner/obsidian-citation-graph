@@ -171,11 +171,7 @@ export async function fetchRefsAndCitations(
       console.error("Citation Graph: multi-source task rejected:", r.reason);
     }
   }
-  const fulfilled = results
-    .filter((r): r is PromiseFulfilledResult<{ source: string; references: S2Paper[]; citations: S2Paper[] }> =>
-      r.status === "fulfilled"
-    )
-    .map((r) => r.value);
+  const fulfilled = results.flatMap((r) => (r.status === "fulfilled" ? [r.value] : []));
 
   if (fulfilled.length === 0) return null;
 

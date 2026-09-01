@@ -12,7 +12,7 @@ export default defineConfig([
     languageOptions: {
       parserOptions: {
         projectService: {
-          allowDefaultProject: ["eslint.config.*", "*.config.mts"],
+          allowDefaultProject: ["*.config.mjs", "*.config.mts"],
         },
       },
     },

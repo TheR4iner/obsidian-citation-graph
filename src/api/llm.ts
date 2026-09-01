@@ -4,6 +4,7 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import type { Paper, CitationGraphSettings, LlmResponse } from "../types";
+import { asNumber, asRecordArray, asString, parseJson, pick } from "./json";
 
 /** Default models per provider (used when settings.llmModel is empty) */
 const DEFAULT_MODELS: Record<string, string> = {
@@ -39,7 +40,13 @@ const CLI_TIMEOUT_MS = 300000;
 /** How much of the CLI's stderr to keep for the error message, in characters. */
 const CLI_STDERR_KEEP_CHARS = 4000;
 
-/** Read a PDF as base64, refusing anything past MAX_PDF_BYTES. */
+/**
+ * Read a PDF as base64, refusing anything past MAX_PDF_BYTES.
+ *
+ * The path is expected to have been checked against the folders the user
+ * configured for downloads before it gets here; `main.ts` is the only producer
+ * and does that with `assertInsideFolders`.
+ */
 function readPdfBase64(pdfPath: string): string {
 	const { size } = fs.statSync(pdfPath);
 	if (size > MAX_PDF_BYTES) {
@@ -199,10 +206,9 @@ function anthropicWebSearchTool(model: string): Record<string, unknown> {
 
 /** Concatenate every text block of an Anthropic response. */
 function anthropicText(content: unknown): string {
-	if (!Array.isArray(content)) return "";
-	return content
-		.filter((block) => block?.type === "text" && typeof block.text === "string")
-		.map((block) => block.text as string)
+	return asRecordArray(content)
+		.filter((block) => asString(block.type) === "text")
+		.map((block) => asString(block.text) ?? "")
 		.join("");
 }
 
@@ -259,14 +265,14 @@ async function callAnthropic(
 			body: JSON.stringify(body),
 		});
 
-		const json = response.json;
-		text += anthropicText(json.content);
-		inputTokens += json.usage?.input_tokens ?? 0;
-		outputTokens += json.usage?.output_tokens ?? 0;
-		stopReason = json.stop_reason;
+		const json: unknown = response.json;
+		text += anthropicText(pick(json, "content"));
+		inputTokens += asNumber(pick(json, "usage", "input_tokens")) ?? 0;
+		outputTokens += asNumber(pick(json, "usage", "output_tokens")) ?? 0;
+		stopReason = asString(pick(json, "stop_reason")) ?? undefined;
 
-		if (json.stop_reason !== "pause_turn") break;
-		messages.push({ role: "assistant", content: json.content });
+		if (stopReason !== "pause_turn") break;
+		messages.push({ role: "assistant", content: pick(json, "content") });
 	}
 
 	return { text, inputTokens, outputTokens, stopReason };
@@ -312,13 +318,13 @@ async function callOpenAI(
 		body: JSON.stringify(body),
 	});
 
-	const json = response.json;
-	const text = json.choices?.[0]?.message?.content ?? "";
+	const json: unknown = response.json;
+	const choice = pick(json, "choices", "0");
 	return {
-		text,
-		inputTokens: json.usage?.prompt_tokens ?? 0,
-		outputTokens: json.usage?.completion_tokens ?? 0,
-		stopReason: json.choices?.[0]?.finish_reason,
+		text: asString(pick(choice, "message", "content")) ?? "",
+		inputTokens: asNumber(pick(json, "usage", "prompt_tokens")) ?? 0,
+		outputTokens: asNumber(pick(json, "usage", "completion_tokens")) ?? 0,
+		stopReason: asString(pick(choice, "finish_reason")) ?? undefined,
 	};
 }
 
@@ -382,43 +388,133 @@ async function callGoogle(
 		body: JSON.stringify(body),
 	});
 
-	const json = response.json;
+	const json: unknown = response.json;
+	const candidate = pick(json, "candidates", "0");
 	// Grounded answers arrive split across several parts; taking only the first
 	// truncates the response at the first citation boundary.
-	const parts0 = json.candidates?.[0]?.content?.parts;
-	const text = Array.isArray(parts0)
-		? parts0
-			.filter((p: { text?: unknown }) => typeof p?.text === "string")
-			.map((p: { text: string }) => p.text)
-			.join("")
-		: "";
+	const text = asRecordArray(pick(candidate, "content", "parts"))
+		.map((part) => asString(part.text) ?? "")
+		.join("");
 	return {
 		text,
-		inputTokens: json.usageMetadata?.promptTokenCount ?? 0,
-		outputTokens: json.usageMetadata?.candidatesTokenCount ?? 0,
-		stopReason: json.candidates?.[0]?.finishReason,
+		inputTokens: asNumber(pick(json, "usageMetadata", "promptTokenCount")) ?? 0,
+		outputTokens: asNumber(pick(json, "usageMetadata", "candidatesTokenCount")) ?? 0,
+		stopReason: asString(pick(candidate, "finishReason")) ?? undefined,
 	};
 }
 
-// ─── Claude CLI (legacy) ──────────────────────────────────────
-// Uses child_process.execFile (not exec) with an argument array,
-// so there is no shell interpolation and no injection risk.
+// ─── Claude CLI ───────────────────────────────────────────────
+//
+// This is the only place the plugin runs a program. Three things keep that
+// narrow, and all three are enforced rather than assumed:
+//
+//   - It runs only when the user has picked "claude-cli" as their provider.
+//   - It runs only the claude binary: spawn with an argument array and no
+//     shell, so nothing in a prompt or a paper title can become a command,
+//     and a configured path is validated before it is handed over.
+//   - It is given a curated environment, not Obsidian's whole one.
+
+/**
+ * The environment variables the CLI is given.
+ *
+ * A child process inherits its parent's environment by default, which here
+ * would hand a third-party binary every secret the user has exported: their
+ * Zotero key, their OpenAI key, whatever else is in the shell Obsidian was
+ * launched from. The CLI needs to find the user's home, a PATH, a temporary
+ * directory and its own configuration, so that is what it gets.
+ */
+const CLI_ENV_ALLOWLIST = [
+	"PATH",
+	"HOME",
+	"USER",
+	"LOGNAME",
+	"SHELL",
+	"LANG",
+	"LC_ALL",
+	"TERM",
+	"TMPDIR",
+	"TMP",
+	"TEMP",
+	"XDG_CONFIG_HOME",
+	"XDG_DATA_HOME",
+	"XDG_CACHE_HOME",
+	// Windows needs these to resolve a home directory and run at all.
+	"APPDATA",
+	"LOCALAPPDATA",
+	"USERPROFILE",
+	"HOMEDRIVE",
+	"HOMEPATH",
+	"SystemRoot",
+	"SystemDrive",
+	"ComSpec",
+	"PATHEXT",
+] as const;
+
+/** Whole families the CLI configures itself with. */
+const CLI_ENV_PREFIXES = ["ANTHROPIC_", "CLAUDE_"] as const;
+
+/** Build the child's environment from an allow-list. Exported for testing. */
+export function cliEnvironment(
+	parent: NodeJS.ProcessEnv = process.env
+): NodeJS.ProcessEnv {
+	const env: NodeJS.ProcessEnv = {};
+	for (const [key, value] of Object.entries(parent)) {
+		if (value === undefined) continue;
+		const allowed =
+			(CLI_ENV_ALLOWLIST as readonly string[]).includes(key) ||
+			CLI_ENV_PREFIXES.some((prefix) => key.startsWith(prefix));
+		if (allowed) env[key] = value;
+	}
+	return env;
+}
+
+/**
+ * Reject a configured path that cannot be a plain executable path.
+ *
+ * The setting is the one place this plugin will run something the user chose,
+ * so it is worth being exact. spawn without a shell already makes injection
+ * impossible, which is why this checks shape rather than escaping: a value
+ * carrying a newline, a null byte or a shell operator was not a path the user
+ * meant to type, and running it anyway is the wrong response to a typo.
+ */
+export function isUsableCliPath(value: string): boolean {
+	if (value === "" || value.length > 4096) return false;
+	if (/[\0\n\r]/.test(value)) return false;
+	if (/[;&|<>$`"'*?]/.test(value)) return false;
+	// Either the bare command name, resolved through PATH, or a full path.
+	return value === "claude" || path.isAbsolute(value);
+}
 
 /**
  * Pick which claude binary to invoke. Order of preference:
- *   1. User-configured absolute path (settings.claudeCliPath)
+ *   1. The configured path (settings.claudeCliPath), if it is usable and the
+ *      file is actually there.
  *   2. ~/.local/bin/claude -- the canonical path the official installer uses
  *      on Linux/macOS. Electron's inherited PATH typically excludes this dir,
  *      so we check it explicitly before falling back to PATH lookup.
  *   3. "claude" via PATH (may resolve to a system-wide install)
+ *
+ * Throws rather than falling through when the configured path is unusable:
+ * quietly running a different binary than the one named in the settings is
+ * exactly the surprise this whole section exists to avoid.
  */
 function resolveClaudeCliPath(settings: CitationGraphSettings): string {
 	const configured = settings.claudeCliPath?.trim();
-	if (configured) return configured;
+	if (configured) {
+		if (!isUsableCliPath(configured)) {
+			throw new Error(
+				`"Claude CLI path" is not a usable path to an executable: ${configured}`
+			);
+		}
+		if (path.isAbsolute(configured) && !isExecutableFile(configured)) {
+			throw new Error(`No file found at the configured Claude CLI path: ${configured}`);
+		}
+		return configured;
+	}
 
 	try {
 		const userLocal = path.join(os.homedir(), ".local", "bin", "claude");
-		if (fs.existsSync(userLocal)) return userLocal;
+		if (isExecutableFile(userLocal)) return userLocal;
 	} catch {
 		// os.homedir() can throw in unusual environments; fall through
 	}
@@ -426,28 +522,46 @@ function resolveClaudeCliPath(settings: CitationGraphSettings): string {
 	return "claude";
 }
 
-/** Turn one streamed CLI event into a line for the progress notice. */
-export function describeCliEvent(event: Record<string, any>): string | null {
-	if (event.type === "system" && event.subtype === "thinking_tokens") {
-		return `Thinking (${event.estimated_tokens} tokens)`;
+/** Whether a path names a file that exists (a directory is not runnable). */
+function isExecutableFile(target: string): boolean {
+	try {
+		return fs.statSync(target).isFile();
+	} catch {
+		return false;
 	}
-	if (event.type !== "assistant") return null;
+}
 
-	const blocks = event.message?.content;
-	if (!Array.isArray(blocks)) return null;
+/**
+ * Turn one streamed CLI event into a line for the progress notice.
+ *
+ * The events are read as `unknown` and narrowed field by field. They come from
+ * a separate program on its own release schedule, and a shape change should
+ * cost the progress line, not the summary that is being written.
+ */
+export function describeCliEvent(event: unknown): string | null {
+	if (
+		asString(pick(event, "type")) === "system" &&
+		asString(pick(event, "subtype")) === "thinking_tokens"
+	) {
+		return `Thinking (${asNumber(pick(event, "estimated_tokens")) ?? 0} tokens)`;
+	}
+	if (asString(pick(event, "type")) !== "assistant") return null;
 
-	for (const block of blocks) {
-		if (block?.type === "tool_use" || block?.type === "server_tool_use") {
-			const input = block.input ?? {};
-			if (block.name === "WebSearch" && input.query) {
-				return `Searching the web: ${String(input.query).slice(0, 60)}`;
+	for (const block of asRecordArray(pick(event, "message", "content"))) {
+		const kind = asString(block.type);
+		if (kind === "tool_use" || kind === "server_tool_use") {
+			const name = asString(block.name) ?? "a tool";
+			const query = asString(pick(block, "input", "query"));
+			if (name === "WebSearch" && query) {
+				return `Searching the web: ${query.slice(0, 60)}`;
 			}
-			if (block.name === "WebFetch" && input.url) {
-				return `Reading ${String(input.url).slice(0, 60)}`;
+			const url = asString(pick(block, "input", "url"));
+			if (name === "WebFetch" && url) {
+				return `Reading ${url.slice(0, 60)}`;
 			}
-			return `Using ${block.name}`;
+			return `Using ${name}`;
 		}
-		if (block?.type === "text" && block.text?.trim()) {
+		if (kind === "text" && asString(block.text)?.trim()) {
 			return "Writing the answer";
 		}
 	}
@@ -486,6 +600,12 @@ function callClaudeCli(
 		const child = child_process.spawn(executable, args, {
 			timeout: request.timeoutMs ?? CLI_TIMEOUT_MS,
 			stdio: ["ignore", "pipe", "pipe"],
+			// No shell: the arguments carry a prompt and a paper title, both of
+			// which contain arbitrary text from remote sources. Passed as an
+			// array to a shell-less spawn they are inert.
+			shell: false,
+			env: cliEnvironment(),
+			windowsHide: true,
 		});
 
 		let buffer = "";
@@ -496,18 +616,15 @@ function callClaudeCli(
 		const handleLine = (line: string): void => {
 			const trimmed = line.trim();
 			if (!trimmed.startsWith("{")) return;
-			let event: Record<string, any>;
-			try {
-				event = JSON.parse(trimmed);
-			} catch {
-				// Not every line is an event; warnings share the stream.
-				return;
-			}
+			// Not every line is an event; warnings share the stream.
+			const event = parseJson(trimmed);
+			if (event === undefined) return;
 
-			if (event.type === "result") {
-				const text = typeof event.result === "string" ? event.result : "";
-				if (event.is_error) {
-					failure = text || `claude reported an error (${event.subtype ?? "unknown"})`;
+			if (asString(pick(event, "type")) === "result") {
+				const text = asString(pick(event, "result")) ?? "";
+				if (pick(event, "is_error") === true) {
+					const subtype = asString(pick(event, "subtype")) ?? "unknown";
+					failure = text || `claude reported an error (${subtype})`;
 				} else {
 					// Token counts stay zero for this provider, as the batch
 					// token budget documents: the CLI bills through the user's
@@ -516,7 +633,7 @@ function callClaudeCli(
 						text: text.trim(),
 						inputTokens: 0,
 						outputTokens: 0,
-						stopReason: typeof event.stop_reason === "string" ? event.stop_reason : undefined,
+						stopReason: asString(pick(event, "stop_reason")) ?? undefined,
 					};
 				}
 				return;

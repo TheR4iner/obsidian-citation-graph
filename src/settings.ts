@@ -323,7 +323,7 @@ export class CitationGraphSettingTab extends PluginSettingTab {
           .setValue(isCustomColor(stored) ? CUSTOM_COLOR : stored)
           .onChange(async (value) => {
             const custom = value === CUSTOM_COLOR;
-            this.plugin.settings[key] = custom ? (hex as StatusColor) : (value as StatusColor);
+            this.plugin.settings[key] = custom ? hex : (value as StatusColor);
             showHexField(custom);
             await this.plugin.saveSettings();
             refreshClashWarning();
@@ -346,7 +346,7 @@ export class CitationGraphSettingTab extends PluginSettingTab {
             if (!valid) return;
             hex = parsed;
             text.inputEl.setCssProps({ "--cg-swatch": parsed });
-            this.plugin.settings[key] = parsed as StatusColor;
+            this.plugin.settings[key] = parsed;
             await this.plugin.saveSettings();
             refreshClashWarning();
           });
@@ -759,9 +759,8 @@ class BannedPapersManagerModal extends Modal {
         text: "Remove",
         cls: "citation-graph-banned-remove",
       });
-      removeBtn.addEventListener("click", async () => {
-        await this.removeBannedPaper(paper.id);
-        this.renderList();
+      removeBtn.addEventListener("click", () => {
+        void this.removeBannedPaper(paper.id).then(() => this.renderList());
       });
     }
   }
