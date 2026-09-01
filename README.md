@@ -12,6 +12,7 @@ Six papers on a canvas. Each node is a literature note, its border colour is the
 
 - [What it does](#what-it-does)
 - [Requirements](#requirements)
+- [What this plugin sends, reads and costs](#what-this-plugin-sends-reads-and-costs)
 - [Installation](#installation)
 - [Quick start](#quick-start)
 - [Commands](#commands)
@@ -46,11 +47,33 @@ Zoomed out, the shape of the literature shows: papers are placed left to right b
 
 ## Requirements
 
-- **Obsidian 1.4.0 or later**, on desktop. The plugin talks to local processes and the filesystem, so it does not run on mobile.
+- **Obsidian 1.7.2 or later**, on desktop. The plugin talks to local processes and the filesystem, so it does not run on mobile.
 - **Zotero**, running, with the local API enabled: Edit, Settings, Advanced, then tick *"Allow other applications on this computer to communicate with Zotero"*.
 - **Better BibTeX** (recommended) for the citekeys used in note filenames and matching.
 - For *Write summary* and *Recommend papers*: an API key for Anthropic, OpenAI or Google Gemini, or the Claude CLI installed locally.
 - For *Sync canvas to Zotero*: a Zotero API key and user ID from [zotero.org/settings/keys](https://www.zotero.org/settings/keys).
+
+## What this plugin sends, reads and costs
+
+Nothing here happens without you running a command, and nothing is collected about you: the plugin has no telemetry, no analytics and no server of its own.
+
+**Remote services.** Each is contacted only by the command that needs it.
+
+| Service | When | What is sent |
+| --- | --- | --- |
+| Zotero local API, `localhost:23119` | *Create from collection*, *Create from tag* | Nothing leaves your machine |
+| `api.semanticscholar.org` | Resolving papers and their citation links | DOIs, arXiv IDs, paper titles |
+| `api.openalex.org` | Papers Semantic Scholar cannot resolve; finding an arXiv preprint behind a publisher DOI | DOIs, and your contact email if you set one |
+| `api.crossref.org` | Papers the above cannot resolve | DOIs, and your contact email if you set one |
+| `export.arxiv.org`, `arxiv.org` | arXiv metadata, title search, PDF download | arXiv IDs, paper titles |
+| `api.zotero.org` | *Sync canvas to Zotero* | Paper metadata, plus your Zotero API key |
+| `api.anthropic.com`, `api.openai.com`, `generativelanguage.googleapis.com` | *Write summary*, *Recommend papers* | The paper's PDF, or the canvas's titles, authors, years and identifiers; abstracts only if you tick *Include abstracts* |
+
+**Files outside your vault.** PDFs are not notes, so they are not kept in the vault. *Download* writes them to the folder you name, and *Write summary* reads them back from it to send to a model. The plugin touches no other path. It also writes its own log and reference cache inside its plugin folder, which lives in your vault's configuration directory.
+
+**A local process.** If you choose the *Claude CLI* provider, *Write summary* and *Recommend papers* run the `claude` binary already installed on your machine, at the path you configure. Nothing is downloaded or installed for you, ever.
+
+**Costs.** The plugin is free, and so is everything it needs to build a canvas. *Write summary* and *Recommend papers* are the exception: they call Anthropic, OpenAI or Google under your own account, and those providers bill you per call. Without a key there are no summaries and no recommendations; every other feature works without one.
 
 ## Installation
 

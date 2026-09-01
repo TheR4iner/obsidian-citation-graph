@@ -6,6 +6,12 @@ Each released version here is also the body of the matching [GitHub release](htt
 
 ## [Unreleased]
 
+### Changed
+
+- **Citation Graph now requires Obsidian 1.7.2 or later.** The manifest previously claimed 1.4.0, which was never true: the settings tab has always needed 1.4.10, deleting a paper has needed 1.6.6, and the reference cache and log file need 1.7.2. On an older Obsidian the plugin failed to load rather than saying why. `versions.json` has been corrected for every past release for the same reason.
+- The README now sets out, in one place, every remote service the plugin contacts and what is sent to it, why PDFs live outside your vault, that the `claude` binary is the one already on your machine and nothing is ever downloaded or installed for you, and which features bill to your own account. There is no telemetry of any kind.
+- A few buttons and labels now read in sentence case: *Download all*, *Skip these*, *Proceed with all*, and the download picker's *Downloaded* and *No ID yet* badges.
+
 ## [0.4.0] - 2026-09-01
 
 ### Added

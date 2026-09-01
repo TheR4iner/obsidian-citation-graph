@@ -162,12 +162,13 @@ describe("downloadPapers", () => {
 	it("passes the plugin directory to the fallback", async () => {
 		const download = vi.fn(async () => null);
 		getDownloadFallback.mockReturnValue(makeFallback({ download }));
+		// Any absolute path will do: downloadPapers passes it straight through.
+		// The real one comes from Vault#configDir, which the user can rename.
+		const pluginDir = path.join(dir, "plugins", "citation-graph");
 
-		await downloadPapers([makePaper()], dir, "/vault/.obsidian/plugins/citation-graph");
+		await downloadPapers([makePaper()], dir, pluginDir);
 
-		expect(download).toHaveBeenCalledWith(expect.anything(), dir, {
-			pluginDir: "/vault/.obsidian/plugins/citation-graph",
-		});
+		expect(download).toHaveBeenCalledWith(expect.anything(), dir, { pluginDir });
 	});
 
 	it("fails every paper when the download folder cannot be used", async () => {

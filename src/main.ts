@@ -854,7 +854,7 @@ export default class CitationGraphPlugin extends Plugin {
               done(item.file);
             }
             onClose() {
-              setTimeout(() => done(null), 50);
+              window.setTimeout(() => done(null), 50);
             }
           }
           const picker = new PaperPicker(this.app);
@@ -1938,7 +1938,7 @@ export default class CitationGraphPlugin extends Plugin {
           }
           onClose() {
             // Delay to let onChooseItem fire first
-            setTimeout(() => done(null), 50);
+            window.setTimeout(() => done(null), 50);
           }
         }
         new SyncModeModal(this.app).open();
@@ -2432,7 +2432,7 @@ export default class CitationGraphPlugin extends Plugin {
           done(item.file);
         }
         onClose() {
-          setTimeout(() => done(null), 50);
+          window.setTimeout(() => done(null), 50);
         }
       }
       new PaperPicker(this.app).open();
@@ -2700,7 +2700,7 @@ export default class CitationGraphPlugin extends Plugin {
             done(item.id);
           }
           onClose() {
-            setTimeout(() => done(null), 50);
+            window.setTimeout(() => done(null), 50);
           }
         }
         new ModePicker(this.app).open();
@@ -2737,7 +2737,7 @@ export default class CitationGraphPlugin extends Plugin {
             done(file);
           }
           onClose() {
-            setTimeout(() => done(null), 50);
+            window.setTimeout(() => done(null), 50);
           }
         }
         new CanvasPicker(this.app).open();
@@ -2936,7 +2936,7 @@ export default class CitationGraphPlugin extends Plugin {
               done(item.file);
             }
             onClose() {
-              setTimeout(() => done(null), 50);
+              window.setTimeout(() => done(null), 50);
             }
           }
           new PaperPicker(this.app).open();
@@ -3262,7 +3262,7 @@ class DoiInputModal extends Modal {
       }
     });
 
-    setTimeout(() => input.focus(), 50);
+    window.setTimeout(() => input.focus(), 50);
   }
 
   onClose(): void {
@@ -3337,6 +3337,7 @@ function paperToZoteroItem(p: {
  */
 function sanitizeVaultFolderName(name: string): string {
   const trimmed = name
+    // eslint-disable-next-line no-control-regex -- illegal in filenames, matched on purpose
     .replace(/[\\/:*?"<>|\x00-\x1f]/g, "")
     .replace(/\s+/g, " ")
     .replace(/[. ]+$/g, "")

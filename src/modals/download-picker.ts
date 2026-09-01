@@ -32,6 +32,7 @@ function isValidArxivId(id: string): boolean {
 export function sanitizeFilename(name: string): string {
   return name
     // Windows-illegal set plus control characters
+    // eslint-disable-next-line no-control-regex -- illegal in filenames, matched on purpose
     .replace(/[<>:"/\\|?*\x00-\x1f]/g, "")
     .replace(/\s+/g, " ")
     // Strip trailing dots/spaces which Windows also rejects
@@ -109,7 +110,7 @@ export class DownloadPickerModal extends Modal {
   private countEl: HTMLElement | null = null;
   private downloadPath: string;
   /** Pending debounced rescan of the download folder; cleared on close. */
-  private rescanTimer: ReturnType<typeof setTimeout> | null = null;
+  private rescanTimer: number | null = null;
 
   private resolvePromise: ((result: DownloadPickerResult | null) => void) | null = null;
 
@@ -200,8 +201,8 @@ export class DownloadPickerModal extends Modal {
     // freezes the modal on large or network-mounted folders.
     pathInput.addEventListener("input", () => {
       this.downloadPath = pathInput.value.trim();
-      if (this.rescanTimer) clearTimeout(this.rescanTimer);
-      this.rescanTimer = setTimeout(() => {
+      if (this.rescanTimer) window.clearTimeout(this.rescanTimer);
+      this.rescanTimer = window.setTimeout(() => {
         this.rescanTimer = null;
         this.checkAlreadyDownloaded();
         this.renderList();
@@ -320,10 +321,10 @@ export class DownloadPickerModal extends Modal {
       const rightActions = row.createDiv("citation-graph-row-actions");
       if (choice.alreadyDownloaded) {
         const badge = rightActions.createDiv("citation-graph-badge citation-graph-badge-downloaded");
-        badge.setText("downloaded");
+        badge.setText("Downloaded");
       } else if (!choice.knownSource) {
         const badge = rightActions.createDiv("citation-graph-badge citation-graph-badge-nosource");
-        badge.setText("no ID yet");
+        badge.setText("No ID yet");
         badge.title =
           "No arXiv ID recorded for this paper. Selecting it searches arXiv by title before giving up.";
       }
@@ -334,7 +335,7 @@ export class DownloadPickerModal extends Modal {
 
   onClose(): void {
     if (this.rescanTimer) {
-      clearTimeout(this.rescanTimer);
+      window.clearTimeout(this.rescanTimer);
       this.rescanTimer = null;
     }
     if (this.resolvePromise) {

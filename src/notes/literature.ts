@@ -156,6 +156,7 @@ export class LiteratureNoteManager {
     // (Windows also rejects those). Preserve spaces and capitalization elsewhere.
     const clean = (value: string): string =>
       value
+        // eslint-disable-next-line no-control-regex -- illegal in filenames, matched on purpose
         .replace(/[\\/:*?"<>|\x00-\x1f]/g, "")
         .replace(/\s+/g, " ")
         .replace(/^[. ]+/, "")
