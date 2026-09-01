@@ -10,6 +10,8 @@ Each released version here is also the body of the matching [GitHub release](htt
 
 - **Canvas: resolve missing citation edges**: re-checks every paper on the canvas against the citation sources and draws each edge whose two endpoints are both already present. Nodes are never moved, so hand-placed positions survive, and an edge already drawn is left alone, so the command is safe to re-run. It is the way to fill in arrows a canvas is missing between papers that arrived by separate routes, which *Expand paper* cannot do: it lists an already-present paper with its row disabled. **(force refresh)** re-queries every paper instead of reusing cached reference data. The closing notice reports edges added, papers served from the cache, papers no source had citation data for, and papers carrying no identifier to look up; the titles behind the last two go to `citation-graph.log`.
 
+- Paper pickers now unfold a full abstract on request: rows still show the first 200 characters, and a **Show more** link next to the cut opens the rest in place (**Show less** folds it back). Every picker gains this, so the abstracts in *Expand paper*, *Recommend papers* and the rest can be read without leaving the dialog. An unfolded abstract stays open while you type in the search box or mark a paper uninteresting.
+
 ### Fixed
 
 - *Expand paper* now draws the citation edge for a paper whose metadata came from OpenAlex, arXiv or Crossref rather than Semantic Scholar. Such a paper was added to the canvas as a node and a note, but its arrow to the expanded paper was dropped without a word, so the two sat side by side unconnected.

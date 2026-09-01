@@ -218,6 +218,25 @@
   line-height: 1.3;
 }
 
+/* Unfolds the rest of a shortened abstract; sits inline after the preview. */
+.citation-graph-abstract-toggle {
+  display: inline;
+  padding: 0;
+  margin-left: 4px;
+  border: none;
+  box-shadow: none;
+  background: transparent;
+  color: var(--text-accent);
+  font-size: inherit;
+  line-height: inherit;
+  cursor: pointer;
+}
+
+.citation-graph-abstract-toggle:hover {
+  background: transparent;
+  text-decoration: underline;
+}
+
 /* The model's justification for a recommended paper, above its abstract. */
 .citation-graph-paper-reason {
   font-size: 0.8em;

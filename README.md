@@ -126,6 +126,10 @@ The same paper in four of the five states, at the default colours. The fifth, *R
 
 **"Read with notes written" is derived, not stored.** As soon as a note contains anything beyond the generated template, whether your own prose, an added heading, a checklist, or a summary from *Write summary*, the paper is painted as annotated. It is therefore absent from the status picker, and it is why *Refresh reading status* exists: writing notes changes a paper's appearance with no command involved. Abandoned papers are the exception and stay abandoned, since notes on them usually record why you dropped the paper.
 
+### Reading an abstract in the picker
+
+Each picker row shows the first 200 characters of the paper's abstract, followed by a **Show more** link when there is more to read. It unfolds the full abstract in place, and **Show less** folds it back. Unfolded abstracts stay open while you search, filter by year or ban a row, so deciding on a paper never means closing the dialog.
+
 ### Marking papers uninteresting
 
 Every row in the *Expand paper* and *Recommend papers* pickers carries a small cross button that marks that paper uninteresting rather than adding it. **Add selected & ban rest** does the same in bulk: it adds what you ticked and marks everything else in the list. Banned papers are filtered out of every later picker for that canvas, so a paper you have already rejected does not keep reappearing each time you expand a neighbour.
