@@ -3,52 +3,6 @@ import type { App } from "obsidian";
 import type { Paper } from "../types";
 
 /**
- * Modal shown after adding a paper to a canvas to offer LLM summarization.
- */
-export class PostAddSummaryModal extends Modal {
-  private resolvePromise: ((result: boolean) => void) | null = null;
-
-  constructor(app: App) {
-    super(app);
-  }
-
-  onOpen(): void {
-    const { contentEl } = this;
-    contentEl.empty();
-    contentEl.addClass("citation-graph-batch-modal");
-
-    this.setTitle("Generate summary?");
-    contentEl.createEl("p", {
-      text: "Would you also like to generate an LLM summary for this paper?",
-    });
-
-    const footer = contentEl.createDiv({ cls: "citation-graph-footer" });
-    new ButtonComponent(footer)
-      .setButtonText("Yes, Summarize")
-      .setCta()
-      .onClick(() => { this.resolvePromise?.(true); this.resolvePromise = null; this.close(); });
-    new ButtonComponent(footer)
-      .setButtonText("No Thanks")
-      .onClick(() => this.close());
-  }
-
-  onClose(): void {
-    if (this.resolvePromise) {
-      this.resolvePromise(false);
-      this.resolvePromise = null;
-    }
-    this.contentEl.empty();
-  }
-
-  pick(): Promise<boolean> {
-    return new Promise((resolve) => {
-      this.resolvePromise = resolve;
-      this.open();
-    });
-  }
-}
-
-/**
  * Modal shown when some papers are missing PDFs during batch summary.
  * Offers to download all missing, skip them, or cancel.
  */

@@ -138,7 +138,7 @@ The list lives in the canvas file, so it travels with the canvas. Review it, or 
 
 ### Write summary
 
-**Write summary finds the PDF** by looking for `Title (Author) (Year).pdf` in the canvas's last download directory and then in the default download path, and offers to download it if it is missing. It warns before summarising anything over ten pages, and asks whether to append or replace when a `## Summary` section already exists.
+**Write summary finds the PDF** by looking for `Title (Author) (Year).pdf` in the canvas's last download directory and then in the default download path, and offers to download it if it is missing. It warns before summarising anything over ten pages, and asks whether to append or replace when a `## Summary` section already exists. It runs only when you ask for it: adding a paper to a canvas never starts a summary on its own.
 
 ### Download
 

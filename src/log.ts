@@ -47,25 +47,6 @@ export function logOnly(message: string): void {
 }
 
 /**
- * Report a caught error: a notice for the user, and the message plus its full
- * stack in the log file.
- *
- * The stack is what makes a report like "Cannot read properties of undefined"
- * actionable, and a user reading `citation-graph.log` is the only one who can
- * supply it: the developer console holds it but nobody looks there unprompted.
- * `context` says which command failed, since the message alone rarely does.
- */
-export function logError(context: string, error: unknown, notice?: string): Notice {
-  const message = error instanceof Error ? error.message : String(error);
-  console.error(`Citation Graph: ${context}`, error);
-  const stack = error instanceof Error && error.stack ? `\n${error.stack}` : "";
-  appendToLog(`${context}: ${message}${stack}`);
-  // `notice` lets a caller show a failure the user can act on ("Claude CLI not
-  // found") while the raw message and stack still reach the log.
-  return new Notice(notice ?? `Error: ${message}`);
-}
-
-/**
  * Drop-in replacement for `new Notice(...)` that also writes to the log file.
  * Returns the Notice instance so callers can chain if needed.
  */
