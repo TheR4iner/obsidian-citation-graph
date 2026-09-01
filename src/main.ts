@@ -7,7 +7,7 @@ import {
   Modal,
   ButtonComponent,
 } from "obsidian";
-import { initLog, logError, logNotice, logOnly } from "./log";
+import { initLog, logNotice, logOnly } from "./log";
 import { ProgressNotice } from "./progress-notice";
 import type {
   CitationGraphSettings,
@@ -408,7 +408,8 @@ export default class CitationGraphPlugin extends Plugin {
         zoteroCollectionKey: collection.data.key,
       });
     } catch (e) {
-      logError("Error creating canvas", e);
+      console.error("Citation Graph: Error creating canvas", e);
+      logNotice(`Error: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
 
@@ -429,7 +430,8 @@ export default class CitationGraphPlugin extends Plugin {
         zoteroTags: result.tags,
       });
     } catch (e) {
-      logError("Error creating canvas from tag", e);
+      console.error("Citation Graph: Error creating canvas from tag", e);
+      logNotice(`Error: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
 
@@ -883,7 +885,8 @@ export default class CitationGraphPlugin extends Plugin {
         `Added ${selected.length} papers to canvas.`
       );
     } catch (e) {
-      logError("Error expanding paper", e);
+      console.error("Citation Graph: Error expanding paper", e);
+      logNotice(`Error: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
   // ─── Add Paper by DOI or arXiv ──────────────────────────
@@ -1034,7 +1037,8 @@ export default class CitationGraphPlugin extends Plugin {
         );
       }
     } catch (e) {
-      logError("Error adding paper by DOI", e);
+      console.error("Citation Graph: Error adding paper by DOI", e);
+      logNotice(`Error: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
 
@@ -1265,7 +1269,8 @@ export default class CitationGraphPlugin extends Plugin {
           : `Added ${addedEdges.length} citation edge${addedEdges.length === 1 ? "" : "s"} (${detail.join(", ")}).`
       );
     } catch (e) {
-      logError("Error resolving missing edges", e);
+      console.error("Citation Graph: Error resolving missing edges", e);
+      logNotice(`Error: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
       progress.hide();
     }
@@ -1484,7 +1489,8 @@ export default class CitationGraphPlugin extends Plugin {
 
       await this.addRecommendedPapers(canvasFile, canvasData, existingPapers, selected);
     } catch (e) {
-      logError("Error recommending papers", e);
+      console.error("Citation Graph: Error recommending papers", e);
+      logNotice(`Error: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
 
@@ -1686,7 +1692,8 @@ export default class CitationGraphPlugin extends Plugin {
         );
       }
     } catch (e) {
-      logError("Error downloading papers", e);
+      console.error("Citation Graph: Error downloading papers", e);
+      logNotice(`Error: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
 
@@ -1910,7 +1917,8 @@ export default class CitationGraphPlugin extends Plugin {
 
       logNotice("Zotero sync complete!");
     } catch (e) {
-      logError("Error syncing to Zotero", e);
+      console.error("Citation Graph: Error syncing to Zotero", e);
+      logNotice(`Error: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
 
@@ -1943,7 +1951,8 @@ export default class CitationGraphPlugin extends Plugin {
       const papers = canvasData.nodes.filter((n) => n.type === "file" && n.file).length;
       logNotice(`Refreshed reading status for ${papers} node${papers === 1 ? "" : "s"}.`);
     } catch (e) {
-      logError("Error refreshing reading status", e);
+      console.error("Citation Graph: Error refreshing reading status", e);
+      logNotice(`Error: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
 
@@ -1970,7 +1979,8 @@ export default class CitationGraphPlugin extends Plugin {
         `Set ${applied} paper${applied === 1 ? "" : "s"} to "${STATUS_LABELS[status]}".`
       );
     } catch (e) {
-      logError("Error setting paper status", e);
+      console.error("Citation Graph: Error setting paper status", e);
+      logNotice(`Error: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
 
@@ -1997,7 +2007,8 @@ export default class CitationGraphPlugin extends Plugin {
           : `Advanced reading status for ${applied} papers.`
       );
     } catch (e) {
-      logError("Error cycling reading status", e);
+      console.error("Citation Graph: Error cycling reading status", e);
+      logNotice(`Error: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
 
@@ -2141,7 +2152,8 @@ export default class CitationGraphPlugin extends Plugin {
         `Deleted ${removedNodeIds.size} paper${removedNodeIds.size !== 1 ? "s" : ""} (${trashed} note${trashed !== 1 ? "s" : ""} trashed).`
       );
     } catch (e) {
-      logError("Error deleting paper", e);
+      console.error("Citation Graph: Error deleting paper", e);
+      logNotice(`Error: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
 
@@ -2427,7 +2439,8 @@ export default class CitationGraphPlugin extends Plugin {
       await this.app.vault.modify(activeFile, JSON.stringify(updatedCanvas, null, 2));
       logNotice(`Relayouted ${papers.length} papers chronologically.`);
     } catch (e) {
-      logError("Error relayouting canvas", e);
+      console.error("Citation Graph: Error relayouting canvas", e);
+      logNotice(`Error: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
 
@@ -2737,7 +2750,8 @@ export default class CitationGraphPlugin extends Plugin {
       if (edgesToAdd.length > 0) msg += `, ${edgesToAdd.length} edge${edgesToAdd.length !== 1 ? "s" : ""} added`;
       logNotice(msg);
     } catch (e) {
-      logError("Error sending papers to canvas", e);
+      console.error("Citation Graph: Error sending papers to canvas", e);
+      logNotice(`Error: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
 
@@ -2836,16 +2850,15 @@ export default class CitationGraphPlugin extends Plugin {
       const lastDownloadPath = canvasData.citationGraphMeta?.lastDownloadPath || "";
       await this.summarizePapersWithPdfs(papers, lastDownloadPath);
     } catch (e) {
+      console.error("Citation Graph: Error writing summary", e);
       const msg = e instanceof Error ? e.message : String(e);
-      // Two failures have a clearer explanation than their raw message. The
-      // message and stack still go to the log either way.
-      const friendly =
-        msg.includes("ENOENT") && msg.includes("claude")
-          ? "Claude CLI not found. Make sure Claude Code is installed and 'claude' is on your PATH."
-          : msg.includes("TIMEOUT") || msg.includes("timed out")
-            ? "Summary generation timed out."
-            : undefined;
-      logError("Error writing summary", e, friendly);
+      if (msg.includes("ENOENT") && msg.includes("claude")) {
+        logNotice("Claude CLI not found. Make sure Claude Code is installed and 'claude' is on your PATH.");
+      } else if (msg.includes("TIMEOUT") || msg.includes("timed out")) {
+        logNotice("Summary generation timed out.");
+      } else {
+        logNotice(`Error: ${msg}`);
+      }
     }
   }
 

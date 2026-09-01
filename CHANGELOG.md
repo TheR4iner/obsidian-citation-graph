@@ -19,7 +19,6 @@ Each released version here is also the body of the matching [GitHub release](htt
 - A citation edge that cannot be matched to a node is recorded in `citation-graph.log` with both of its endpoints instead of vanishing silently.
 - Every canvas command now works on a canvas Obsidian has just created. Such a canvas is an empty file on disk, which the plugin could not read: *Add paper by DOI or arXiv ID*, *Send papers to another canvas* and the rest all failed with `Unexpected end of JSON input`. Adding a paper to a blank canvas now simply adds it, and the commands that need papers say so plainly instead of reporting a parse error. A canvas whose contents are genuinely corrupt still reports an error, now naming the file.
 - A canvas populated only with *Add paper by DOI or arXiv ID*, never created from a Zotero collection or tag, is now recognised as a citation graph canvas: it takes its name from the file, so *Send papers to another canvas* and *Sync canvas to Zotero* accept it instead of refusing it.
-- When a command fails, `citation-graph.log` now records which command it was and the full stack trace behind the message, not just the one-line message. A report like `Error: Cannot read properties of undefined` was previously impossible to place without opening the developer console, which nothing prompted the user to do.
 
 ## [0.2.1] - 2026-08-27
 
