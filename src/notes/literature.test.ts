@@ -353,6 +353,29 @@ describe("LiteratureNoteManager.syncNoteClass", () => {
 			"citation-graph-status-abandoned",
 		]);
 	});
+
+	// The regression this exists for: setting a status on a paper that already
+	// had notes written in it left the note saying "Reading" while the canvas
+	// node was painted green for "Read + notes written". syncNoteClass had
+	// compared against the metadata cache, which Obsidian had not yet refreshed
+	// after setStatus wrote, decided nothing needed doing, and skipped the
+	// write that would have corrected the class.
+	it("compares against the note on disk, not the stale metadata cache", async () => {
+		const note = makeNote({
+			fm: { doi: "10.1000/xyz", cssclasses: [NOTE_CLASS, "citation-graph-status-annotated"] },
+		});
+		const manager = new LiteratureNoteManager(note.app, "papers");
+		note.freezeCache();
+
+		await manager.setStatus(note.file, "reading");
+		const changed = await manager.syncNoteClass(note.file, "annotated");
+
+		expect(changed).toBe(true);
+		expect(note.fm()?.cssclasses).toEqual([
+			NOTE_CLASS,
+			"citation-graph-status-annotated",
+		]);
+	});
 });
 
 describe("LiteratureNoteManager.ensureNoteClass", () => {

@@ -433,22 +433,24 @@ ${paper.arxiv ? `**arXiv**: [${escapeNoteText(paper.arxiv)}](https://arxiv.org/a
    * with: the marker class that tells a paper from one of the user's own
    * notes, and one status class for the canvas stylesheet to key off.
    *
-   * Writes only when something would actually change, so it is a no-op once a
-   * note is clean, and it rides along with the file read the caller is doing
-   * anyway rather than costing a lookup of its own.
+   * The comparison happens inside `processFrontMatter`, against the note as it
+   * is on disk, and deliberately not against `metadataCache`. Obsidian
+   * refreshes that cache asynchronously after a write, so a caller that has
+   * just called `setStatus` would be compared against the classes from before
+   * that call. When those happen to equal what this method wants to write, it
+   * would skip the write and leave `setStatus`'s class in place: the note then
+   * says one status and the canvas node is painted another.
    */
   async syncNoteClass(file: TFile, status?: DisplayStatus | null): Promise<boolean> {
-    const current = normalizeCssClasses(
-      this.app.metadataCache.getFileCache(file)?.frontmatter?.cssclasses
-    );
-    const next = withNoteClass(current, status);
-    if (current.length === next.length && current.every((c, i) => c === next[i])) {
-      return false;
-    }
+    let changed = false;
     await this.app.fileManager.processFrontMatter(file, (fm) => {
-      fm.cssclasses = next;
+      const current = normalizeCssClasses(fm.cssclasses);
+      const next = withNoteClass(current, status);
+      changed =
+        current.length !== next.length || current.some((c, i) => c !== next[i]);
+      if (changed) fm.cssclasses = next;
     });
-    return true;
+    return changed;
   }
 
   /** Create notes for multiple papers, returning a map of paper ID -> note path */
