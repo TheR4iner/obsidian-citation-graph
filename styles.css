@@ -99,13 +99,31 @@
   pointer-events: none;
 }
 
-/* Every paper starts as "to read". Papers carrying a configured status colour
-   are relabelled by the runtime stylesheet the plugin injects (see
-   applyStatusStyles in main.ts), which also dashes and dims abandoned ones.
-   Those rules are generated because the colours are user-configurable. */
+/* Every paper starts as "to read" with the baseline frame. A paper carrying a
+   configured status colour has these four properties reassigned by the small
+   stylesheet the plugin generates at runtime (see applyStatusStyles in
+   main.ts): that sheet holds nothing but the mapping from colour to status,
+   because only the user's settings know which colour means what. Every value
+   the mapping selects between lives here, so a theme or a snippet can change
+   how a status looks without the plugin's help.
+
+   --cg-frame-width-active is the frame of a paper that has been engaged with,
+   thicker than the baseline so it reads as distinct even before the colour
+   registers. --cg-dim-abandoned fades a paper that was dropped. */
 .canvas-node:has(.citation-graph-note) .canvas-node-container {
   --cg-status-label: "To read";
+  --cg-frame-width-active: 5px;
+  --cg-dim-abandoned: 0.55;
+  border-width: var(--cg-frame-width, 3px) !important;
+  border-style: var(--cg-frame-style, solid) !important;
+  opacity: var(--cg-dim, 1);
   transition: opacity 120ms ease-in-out;
+}
+
+/* A dimmed paper comes back to full strength under the pointer: the note has
+   to stay readable when you go back to it. */
+.canvas-node:has(.citation-graph-note):hover .canvas-node-container {
+  opacity: 1;
 }
 
 /* Citation Graph — Expand Modal */

@@ -138,11 +138,15 @@ The list lives in the canvas file, so it travels with the canvas. Review it, or 
 
 ### Write summary
 
-**Write summary finds the PDF** by looking for `Title (Author) (Year).pdf` in the canvas's last download directory and then in the default download path, and offers to download it if it is missing. It warns before summarising anything over ten pages, and asks whether to append or replace when a `## Summary` section already exists. It runs only when you ask for it: adding a paper to a canvas never starts a summary on its own.
+**Write summary finds the PDF** by looking for `Title (Author) (Year).pdf` in the canvas's last download directory and then in the default download path, and offers to download it if it is missing, arXiv lookup included. It warns before summarising anything over ten pages, and asks whether to append or replace when a `## Summary` section already exists. It runs only when you ask for it: adding a paper to a canvas never starts a summary on its own.
 
 ### Download
 
-**Download** saves as `Title (FirstAuthor) (Year).pdf`. Papers already in the target directory are marked `downloaded` and left unchecked; papers no configured source can supply are marked `no source` and cannot be selected. Only arXiv ships configured, so papers with no arXiv version cannot be fetched. Adding a source is a code change: see [Adding a PDF download source](#adding-a-pdf-download-source).
+**Download** saves as `Title (FirstAuthor) (Year).pdf`. With exactly one paper selected and a download folder already known (the canvas's last one, or the *Default download path* setting), it downloads straight away; otherwise it opens a picker where you choose the papers and the folder. Papers already in the target directory are marked `downloaded` and left unchecked.
+
+**arXiv is always checked before a paper is called unavailable.** A paper added by the DOI of its published version usually has no arXiv ID recorded, because Semantic Scholar files the preprint and the journal article as two unrelated records; the preprint is on arXiv all the same. Such a paper is marked `no ID yet` and left unticked, so a large canvas does not open with dozens of lookups queued, but it stays selectable. Selecting it makes the download run look the paper up: first through the arXiv-minted DOI, then through OpenAlex's record of where the DOI is hosted, then by searching arXiv for the exact title. Any ID found is written into the note's frontmatter, so the next run needs no lookup.
+
+Only arXiv ships configured, so a paper with no arXiv version cannot be fetched. Adding a source is a code change: see [Adding a PDF download source](#adding-a-pdf-download-source).
 
 ### Recommend papers
 
@@ -300,6 +304,7 @@ The **Zotero local API** on `localhost:23119` reads collections and items, needi
 - *Expand paper* and *Add paper by DOI or arXiv* resolve only the edges incident to the paper they act on. An edge between two *other* papers on the canvas needs *Resolve missing citation edges*. See [Resolving citation edges](#resolving-citation-edges).
 - A first run over a large collection takes minutes without a Semantic Scholar API key. See [Rate limits](#rate-limits).
 - Only arXiv is configured as a PDF source, so *Download* and *Write summary* cannot reach a paper that has no arXiv version. See [Download](#download).
+- Finding the arXiv preprint behind a publisher DOI costs a rate-limited request or two per paper, so a batch of papers with no recorded arXiv ID takes noticeably longer than one where the IDs are known.
 - *Recommend papers* drops any suggestion no citation source can identify, so a genuinely obscure paper the model knows about may still be lost.
 - Live progress during a recommendation run needs the Claude CLI; the API providers report elapsed time alone.
 

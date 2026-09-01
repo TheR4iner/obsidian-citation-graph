@@ -172,31 +172,58 @@ export class LiteratureNoteManager {
     return clean(truncated) || "Untitled";
   }
 
+  /**
+   * Index every note in the vault by the identifiers a paper is matched on,
+   * built on first use and then kept current as notes are created.
+   *
+   * Without it, importing a collection walked the whole vault and read the
+   * metadata cache for every note, twice, once per paper: a hundred papers in
+   * a five-thousand-note vault meant a million cache lookups before a single
+   * note was written.
+   */
+  private noteIndex: NoteIndex | null = null;
+
+  private buildNoteIndex(): NoteIndex {
+    const index: NoteIndex = {
+      byDoi: new Map(),
+      byCitekey: new Map(),
+      byS2: new Map(),
+      byTitle: new Map(),
+    };
+    const files = this.app.vault.getMarkdownFiles();
+    for (let rank = 0; rank < files.length; rank++) {
+      const fm = this.app.metadataCache.getFileCache(files[rank])?.frontmatter;
+      if (!fm) continue;
+      indexNote(index, files[rank], rank, {
+        doi: fm.doi,
+        citekey: fm.citekey,
+        semanticScholarId: fm.semantic_scholar_id,
+        title: fm.title,
+      });
+    }
+    return index;
+  }
+
   /** Find an existing literature note for a paper anywhere in the vault */
   async findExistingNote(paper: Paper): Promise<TFile | null> {
-    const files = this.app.vault.getMarkdownFiles();
+    const index = (this.noteIndex ??= this.buildNoteIndex());
 
-    // First pass: match by DOI, citekey, or S2 ID (strongest identifiers)
-    for (const file of files) {
-      const cache = this.app.metadataCache.getFileCache(file);
-      if (!cache?.frontmatter) continue;
-
-      const fm = cache.frontmatter;
-      if (paper.doi && fm.doi && fm.doi === paper.doi) return file;
-      if (paper.citekey && fm.citekey && fm.citekey === paper.citekey) return file;
-      if (
-        paper.semanticScholarId &&
-        fm.semantic_scholar_id &&
-        fm.semantic_scholar_id === paper.semanticScholarId
-      )
-        return file;
+    // First pass: DOI, citekey or S2 ID, the identifiers strong enough to
+    // settle it. When more than one matches, the note that comes first in the
+    // vault wins, which is what the old linear scan did.
+    const strong = [
+      paper.doi ? index.byDoi.get(paper.doi) : undefined,
+      paper.citekey ? index.byCitekey.get(paper.citekey) : undefined,
+      paper.semanticScholarId ? index.byS2.get(paper.semanticScholarId) : undefined,
+    ].filter((match): match is IndexedNote => match !== undefined);
+    if (strong.length > 0) {
+      return strong.reduce((a, b) => (a.rank <= b.rank ? a : b)).file;
     }
 
     // Second pass: match by title in frontmatter
-    for (const file of files) {
-      const cache = this.app.metadataCache.getFileCache(file);
-      if (!cache?.frontmatter?.title) continue;
-      if (paper.title && cache.frontmatter.title === paper.title) return file;
+    if (paper.title) {
+      const byTitle = index.byTitle.get(paper.title);
+      if (byTitle) return byTitle.file;
     }
 
     // Third pass: match by expected file path (handles notes without frontmatter)
@@ -259,6 +286,12 @@ ${paper.arxiv ? `**arXiv**: [${escapeNoteText(paper.arxiv)}](https://arxiv.org/a
       fm.cssclasses = [NOTE_CLASS];
     });
     paper.notePath = path;
+    // Keep the index current so later papers in the same batch see this note
+    // rather than creating a second copy of it. Ranked last, so a note that
+    // was already in the vault still wins any tie.
+    if (this.noteIndex) {
+      indexNote(this.noteIndex, file, Number.MAX_SAFE_INTEGER, paper);
+    }
     return path;
   }
 
@@ -279,20 +312,21 @@ ${paper.arxiv ? `**arXiv**: [${escapeNoteText(paper.arxiv)}](https://arxiv.org/a
 
     // If we just filled in an arXiv ID, also add the link to the note body
     // (below DOI or Year line) so it's clickable from the reader view.
-    if (addedArxiv && paper.arxiv) {
-      const content = await this.app.vault.read(file);
-      if (!content.includes("**arXiv**")) {
+    // Read and written together under the vault's write lock, so a note the
+    // user is editing keeps their edits.
+    const arxiv = paper.arxiv;
+    if (addedArxiv && arxiv) {
+      await this.app.vault.process(file, (content) => {
+        if (content.includes("**arXiv**")) return content;
         const doiLine = content.match(/^\*\*DOI\*\*:.*$/m);
         const yearLine = content.match(/^\*\*Year\*\*:.*$/m);
         const anchor = doiLine?.[0] || yearLine?.[0];
-        if (anchor) {
-          const patched = content.replace(
-            anchor,
-            `${anchor}\n**arXiv**: [${escapeNoteText(paper.arxiv)}](https://arxiv.org/abs/${encodeLinkTarget(paper.arxiv)})`
-          );
-          await this.app.vault.modify(file, patched);
-        }
-      }
+        if (!anchor) return content;
+        return content.replace(
+          anchor,
+          `${anchor}\n**arXiv**: [${escapeNoteText(arxiv)}](https://arxiv.org/abs/${encodeLinkTarget(arxiv)})`
+        );
+      });
     }
   }
 
@@ -452,4 +486,46 @@ function normalizeCssClasses(existing: unknown): string[] {
   if (Array.isArray(existing)) return existing.map(String).filter((c) => c.trim() !== "");
   if (typeof existing === "string" && existing.trim()) return [existing.trim()];
   return [];
+}
+
+/** One note in the identifier index, with its position in the vault. */
+interface IndexedNote {
+  file: TFile;
+  rank: number;
+}
+
+/** Every note in the vault, keyed by each identifier it can be matched on. */
+interface NoteIndex {
+  byDoi: Map<string, IndexedNote>;
+  byCitekey: Map<string, IndexedNote>;
+  byS2: Map<string, IndexedNote>;
+  byTitle: Map<string, IndexedNote>;
+}
+
+/**
+ * Record one note under every identifier it carries. An identifier already
+ * claimed by an earlier note stays with that note, so a lookup returns the
+ * same match the old front-to-back scan did.
+ */
+function indexNote(
+  index: NoteIndex,
+  file: TFile,
+  rank: number,
+  ids: {
+    doi?: unknown;
+    citekey?: unknown;
+    semanticScholarId?: unknown;
+    title?: unknown;
+  }
+): void {
+  const entry: IndexedNote = { file, rank };
+  const add = (map: Map<string, IndexedNote>, key: unknown): void => {
+    if (typeof key !== "string" || key === "") return;
+    const claimed = map.get(key);
+    if (!claimed || claimed.rank > rank) map.set(key, entry);
+  };
+  add(index.byDoi, ids.doi);
+  add(index.byCitekey, ids.citekey);
+  add(index.byS2, ids.semanticScholarId);
+  add(index.byTitle, ids.title);
 }

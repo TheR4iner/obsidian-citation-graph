@@ -2,10 +2,12 @@ import {
   Plugin,
   Notice,
   TFile,
+  FileSystemAdapter,
   normalizePath,
   FuzzySuggestModal,
   Modal,
   ButtonComponent,
+  type WorkspaceLeaf,
 } from "obsidian";
 import { initLog, logNotice, logOnly } from "./log";
 import { ProgressNotice } from "./progress-notice";
@@ -16,6 +18,7 @@ import type {
   CitationGraph,
   CanvasData,
   CanvasNode,
+  CanvasEdge,
   ZoteroItem,
   S2Paper,
   PaperStatus,
@@ -38,6 +41,7 @@ import { OpenAlexClient } from "./api/openalex";
 import { CrossRefClient } from "./api/crossref";
 import { ArxivMetadataClient } from "./api/arxiv-metadata";
 import { resolvePaperWithRefs } from "./api/multi-source";
+import { findArxivId } from "./api/arxiv-lookup";
 import { fetchRefsAndCitations } from "./api/multi-source";
 import { CollectionPickerModal } from "./modals/collection-picker";
 import { TagPickerModal } from "./modals/tag-picker";
@@ -72,6 +76,21 @@ import type { CanvasPaperSummary, VerifiedRecommendation } from "./api/recommend
 import { SummaryProgressModal } from "./modals/summary-progress-modal";
 
 /**
+ * The plugin's own block inside a .canvas file, alongside Obsidian's `nodes`
+ * and `edges`. Absent on a canvas the user created by hand, and every field is
+ * optional because the block has grown over several versions.
+ */
+interface CanvasMeta {
+  citationGraphMeta?: {
+    zoteroCollectionKey?: string;
+    collectionName?: string;
+    zoteroTags?: string[];
+    bannedPapers?: BannedPaper[];
+    lastDownloadPath?: string;
+  };
+}
+
+/**
  * Apply a status color to a canvas node, removing the color entirely when
  * the status maps to none. Canvas JSON omits `color` for default nodes, so
  * an empty string must delete the key rather than be written through.
@@ -82,6 +101,68 @@ function applyStatusColor(node: CanvasNode, color: string): void {
   } else {
     delete node.color;
   }
+}
+
+/**
+ * Paint the nodes a resolved colour map covers and leave every other node
+ * exactly as it is.
+ *
+ * A path missing from the map is not a paper (a canvas holds the user's own
+ * notes too) or arrived on the canvas after the colours were resolved. Either
+ * way its colour is none of the plugin's business.
+ */
+function paintStatusColors(nodes: CanvasNode[], colors: Map<string, string>): void {
+  for (const node of nodes) {
+    if (node.type !== "file" || !node.file) continue;
+    const color = colors.get(node.file);
+    if (color === undefined) continue;
+    applyStatusColor(node, color);
+  }
+}
+
+/**
+ * The parts of Obsidian's canvas view this plugin reads.
+ *
+ * There is no public API for the canvas, so the open file and the current
+ * selection have to be taken off the view object directly. Everything here is
+ * optional on purpose: an Obsidian release that renames one of these leaves
+ * the selection-aware commands falling back to their picker instead of
+ * throwing.
+ */
+interface CanvasViewInternals {
+  file?: unknown;
+  canvas?: {
+    selection?: Iterable<{ filePath?: string; file?: { path?: string } }>;
+  };
+}
+
+/** Read a workspace leaf as a canvas view. */
+function canvasViewOf(leaf: WorkspaceLeaf): CanvasViewInternals {
+  return leaf.view as unknown as CanvasViewInternals;
+}
+
+/** The note path behind every paper node on a canvas. */
+function notePathsOf(nodes: CanvasNode[]): string[] {
+  return nodes
+    .filter((n) => n.type === "file" && n.file)
+    .map((n) => n.file!);
+}
+
+/**
+ * Add papers to a canvas's ban list, skipping any already on it.
+ *
+ * Mutates the canvas it is handed rather than a captured copy, so it can run
+ * inside `updateCanvas` against freshly read content: bans added from another
+ * window while a picker was open survive instead of being overwritten.
+ * Returns how many were genuinely new.
+ */
+function addBannedPapers(canvas: CanvasMeta, additions: BannedPaper[]): number {
+  const meta = (canvas.citationGraphMeta ??= {});
+  const existing = meta.bannedPapers ?? [];
+  const known = new Set(existing.map((b) => b.id));
+  const fresh = additions.filter((b) => b.id && !known.has(b.id));
+  meta.bannedPapers = [...existing, ...fresh];
+  return fresh.length;
 }
 
 export default class CitationGraphPlugin extends Plugin {
@@ -102,11 +183,9 @@ export default class CitationGraphPlugin extends Plugin {
     this.applyStatusStyles();
     this.addSettingTab(new CitationGraphSettingTab(this.app, this));
 
-    const pluginDir = (this.manifest as any).dir;
-    const basePath = (this.app.vault.adapter as any).basePath;
-    initLog(pluginDir, basePath);
+    initLog(this.app.vault.adapter, this.pluginDir);
 
-    this.s2Cache = new S2RefCache(this.app.vault.adapter, pluginDir);
+    this.s2Cache = new S2RefCache(this.app.vault.adapter, this.pluginDir);
     await this.s2Cache.load();
 
     this.s2Client = new SemanticScholarClient();
@@ -312,6 +391,99 @@ export default class CitationGraphPlugin extends Plugin {
     this.statusStyleEl = null;
   }
 
+  /**
+   * This plugin's own folder, as a vault-relative path, holding the reference
+   * cache and the log file.
+   *
+   * `manifest.dir` is what Obsidian actually loaded the plugin from and so
+   * respects a renamed config directory; the fallback reconstructs the same
+   * path for the rare manifest that arrives without it.
+   */
+  private get pluginDir(): string {
+    return (
+      this.manifest.dir ??
+      normalizePath(`${this.app.vault.configDir}/plugins/${this.manifest.id}`)
+    );
+  }
+
+  /**
+   * The same folder as an absolute filesystem path.
+   *
+   * Only the download helpers need this: they hand the path to code running
+   * outside Obsidian, which cannot resolve a vault-relative one. Everything
+   * that stays inside the plugin goes through the vault adapter instead, which
+   * takes the relative form. Null when the vault is not backed by a real
+   * filesystem, so callers report that rather than building a broken path.
+   */
+  private absolutePluginDir(): string | null {
+    const adapter = this.app.vault.adapter;
+    if (!(adapter instanceof FileSystemAdapter)) return null;
+    return path.join(adapter.getBasePath(), this.pluginDir);
+  }
+
+  /**
+   * Find a paper's arXiv ID when its note does not record one.
+   *
+   * Wired into the download path so a paper added by the DOI of its published
+   * version is looked up rather than written off: the preprint is usually
+   * there, and it is only the link between the two that is missing.
+   */
+  private findArxivId(paper: Paper): Promise<string | null> {
+    return findArxivId(paper, {
+      arxiv: this.arxivClient,
+      openalex: this.openAlexClient,
+    });
+  }
+
+  /**
+   * Write arXiv IDs discovered during a download back into their notes, so the
+   * next run finds them recorded and skips the lookup.
+   */
+  private async recordArxivIds(found: Map<string, string>): Promise<void> {
+    for (const [notePath, arxivId] of found) {
+      const noteFile = this.app.vault.getAbstractFileByPath(notePath);
+      if (!(noteFile instanceof TFile)) continue;
+      try {
+        await this.app.fileManager.processFrontMatter(noteFile, (fm) => {
+          if (readFrontmatterArxiv(fm)) return;
+          fm.arxiv = arxivId;
+        });
+      } catch (e) {
+        console.error(
+          `Citation Graph: could not record the arXiv ID on ${notePath}`,
+          e
+        );
+      }
+    }
+  }
+
+  /**
+   * Read a canvas, let `mutate` rewrite it, and save the result.
+   *
+   * `Vault.process` re-reads the file under the vault's write lock, so `mutate`
+   * sees what is on disk at the moment of writing rather than a snapshot taken
+   * before the command started. That distinction is the whole point: these
+   * commands routinely spend minutes in Semantic Scholar or an LLM, and a
+   * read-then-write pair would silently discard every node the user dragged,
+   * added or deleted while they waited.
+   *
+   * The callback therefore has to derive its result from the canvas it is
+   * given, never from one captured earlier. Returning `false` from it leaves
+   * the file completely untouched, which matters because re-serialising a
+   * canvas reformats JSON the user never asked to have reformatted.
+   */
+  private async updateCanvas<T = unknown>(
+    file: TFile,
+    mutate: (canvas: CanvasData & T) => (CanvasData & Partial<T>) | void | false
+  ): Promise<void> {
+    await this.app.vault.process(file, (raw) => {
+      const canvas = parseCanvasData<T>(raw, file.path);
+      const updated = mutate(canvas);
+      if (updated === false) return raw;
+      return JSON.stringify(updated ?? canvas, null, 2);
+    });
+  }
+
   async loadSettings(): Promise<void> {
     const saved = await this.loadData();
     const merged = Object.assign({}, DEFAULT_SETTINGS, saved) as CitationGraphSettings & {
@@ -359,7 +531,8 @@ export default class CitationGraphPlugin extends Plugin {
   }
 
   /**
-   * Rebuild the stylesheet that turns a canvas node's colour into its status.
+   * Rebuild the small stylesheet that says which node colour means which
+   * reading status.
    *
    * Status reaches the canvas as `color` in the .canvas file, which Obsidian
    * turns into a class and a colour on each node. Reading the status back off
@@ -368,6 +541,14 @@ export default class CitationGraphPlugin extends Plugin {
    * stored twice and had to be kept in step, and it resolved through
    * Obsidian's file lookup -- which silently picks the wrong note when two
    * filenames differ only in case.
+   *
+   * The sheet holds nothing but that mapping: each rule assigns the custom
+   * properties `styles.css` reads, and every length, colour and opacity stays
+   * there where a theme or snippet can reach it. It has to be generated at all
+   * only because which colour means which status is the user's choice, and a
+   * static stylesheet cannot know it. Obsidian offers no API for a stylesheet
+   * whose contents change, so the element is managed by hand and removed again
+   * in `onunload`.
    */
   applyStatusStyles(): void {
     if (!this.statusStyleEl) {
@@ -571,8 +752,11 @@ export default class CitationGraphPlugin extends Plugin {
       counter++;
     }
 
-    // Sync read colors for any notes already marked read
-    await this.syncStatusColors(canvasData.nodes);
+    // Paint any notes that already carry a reading status
+    paintStatusColors(
+      canvasData.nodes,
+      await this.resolveStatusColors(notePathsOf(canvasData.nodes))
+    );
 
     // Store metadata in the canvas for later use (expand mode, sync, etc.)
     const canvasWithMeta = {
@@ -614,13 +798,7 @@ export default class CitationGraphPlugin extends Plugin {
       }
 
       // 2. Read canvas data
-      const canvasData = await this.readCanvas<{
-        citationGraphMeta?: {
-          zoteroCollectionKey: string;
-          collectionName: string;
-          bannedPapers?: BannedPaper[];
-        };
-      }>(activeFile);
+      const canvasData = await this.readCanvas<CanvasMeta>(activeFile);
 
       // 3. Ask user which paper to expand (pick from nodes)
       const fileNodes = canvasData.nodes.filter(
@@ -639,18 +817,15 @@ export default class CitationGraphPlugin extends Plugin {
 
       // Check if a node is selected on the canvas
       if (!targetNotePath) {
-        const canvasLeaves = this.app.workspace.getLeavesOfType("canvas");
-        for (const leaf of canvasLeaves) {
-          const canvas = (leaf.view as any)?.canvas;
-          if (!canvas) continue;
-          const selection = canvas.selection;
-          if (selection && selection.size === 1) {
-            const selectedNode = selection.values().next().value;
-            const filePath = selectedNode?.filePath || selectedNode?.file?.path;
-            if (filePath && fileNodes.some((n) => n.file === filePath)) {
-              targetNotePath = filePath;
-              break;
-            }
+        for (const leaf of this.app.workspace.getLeavesOfType("canvas")) {
+          const selection = canvasViewOf(leaf).canvas?.selection;
+          if (!selection) continue;
+          const selected = [...selection];
+          if (selected.length !== 1) continue;
+          const filePath = selected[0]?.filePath || selected[0]?.file?.path;
+          if (filePath && fileNodes.some((n) => n.file === filePath)) {
+            targetNotePath = filePath;
+            break;
           }
         }
       }
@@ -767,35 +942,25 @@ export default class CitationGraphPlugin extends Plugin {
       );
       const { selected, banned } = await expandModal.pickPapers();
 
-      // Save newly banned papers to canvas metadata
-      if (banned.length > 0) {
-        const existingBanned = canvasData.citationGraphMeta?.bannedPapers || [];
-        const existingBannedIds = new Set(existingBanned.map((b) => b.id));
-        const newBanned = banned
-          .filter((p) => !existingBannedIds.has(p.paperId))
-          .map((p) => ({ id: p.paperId, title: p.title || "Untitled" }));
-        if (!canvasData.citationGraphMeta) {
-          (canvasData as any).citationGraphMeta = {};
-        }
-        canvasData.citationGraphMeta!.bannedPapers = [
-          ...existingBanned,
-          ...newBanned,
-        ];
-        // Persist ban list even if no papers were selected
-        if (selected.length === 0) {
-          await this.app.vault.modify(
-            activeFile,
-            JSON.stringify(canvasData, null, 2)
-          );
-          logNotice(
-            `No papers selected. ${newBanned.length} papers marked as uninteresting.`
-          );
-          return;
-        }
-      }
+      // Papers marked uninteresting are never offered on this canvas again.
+      const newBans: BannedPaper[] = banned.map((p) => ({
+        id: p.paperId,
+        title: p.title || "Untitled",
+      }));
 
       if (selected.length === 0) {
-        logNotice("No papers selected.");
+        // The ban list is still worth persisting on its own.
+        if (newBans.length === 0) {
+          logNotice("No papers selected.");
+          return;
+        }
+        let added = 0;
+        await this.updateCanvas<CanvasMeta>(activeFile, (canvas) => {
+          added = addBannedPapers(canvas, newBans);
+        });
+        logNotice(
+          `No papers selected. ${added} papers marked as uninteresting.`
+        );
         return;
       }
 
@@ -856,29 +1021,26 @@ export default class CitationGraphPlugin extends Plugin {
       // 11. Build all-papers map for canvas expansion
       const allPapers = this.indexPapers([...canvasPapers, ...newPapers]);
 
-      // 12. Update canvas
-      const updatedCanvas = expandCanvas(
-        canvasData,
-        newPapers,
-        newEdges,
-        allPapers,
-        this.settings.nodeWidth,
-        this.settings.nodeHeight
-      );
+      // 12. Update canvas. Colours are resolved up front because the write
+      //     itself is synchronous and cannot read notes.
+      const colors = await this.resolveStatusColors([
+        ...notePathsOf(canvasData.nodes),
+        ...newPapers.map((p) => p.notePath).filter((p): p is string => !!p),
+      ]);
 
-      // Sync read colors on expanded nodes
-      await this.syncStatusColors(updatedCanvas.nodes);
-
-      // Preserve metadata
-      const updatedWithMeta = {
-        ...updatedCanvas,
-        citationGraphMeta: (canvasData as any).citationGraphMeta,
-      };
-
-      await this.app.vault.modify(
-        activeFile,
-        JSON.stringify(updatedWithMeta, null, 2)
-      );
+      await this.updateCanvas<CanvasMeta>(activeFile, (canvas) => {
+        addBannedPapers(canvas, newBans);
+        const expanded = expandCanvas(
+          canvas,
+          newPapers,
+          newEdges,
+          allPapers,
+          this.settings.nodeWidth,
+          this.settings.nodeHeight
+        );
+        paintStatusColors(expanded.nodes, colors);
+        return { ...expanded, citationGraphMeta: canvas.citationGraphMeta };
+      });
 
       logNotice(
         `Added ${selected.length} papers to canvas.`
@@ -946,12 +1108,7 @@ export default class CitationGraphPlugin extends Plugin {
       const paper = s2PaperToPaper(s2Paper);
 
       // 4. Read canvas data
-      const canvasData = await this.readCanvas<{
-        citationGraphMeta?: {
-          collectionName: string;
-          [key: string]: unknown;
-        };
-      }>(activeFile);
+      const canvasData = await this.readCanvas<CanvasMeta>(activeFile);
 
       // Check if paper is already on canvas
       const existingNodeIds = new Set(canvasData.nodes.map((n) => n.id));
@@ -979,36 +1136,36 @@ export default class CitationGraphPlugin extends Plugin {
       // 7. Build allPapers map for layout
       const allPapers = this.indexPapers([...canvasPapers, paper]);
 
-      // 8. Update canvas
-      const updatedCanvas = expandCanvas(
-        canvasData,
-        [paper],
-        newEdges,
-        allPapers,
-        this.settings.nodeWidth,
-        this.settings.nodeHeight
-      );
+      // 8. Update canvas. Colours are resolved up front because the write
+      //    itself is synchronous and cannot read notes.
+      const colors = await this.resolveStatusColors([
+        ...notePathsOf(canvasData.nodes),
+        ...(paper.notePath ? [paper.notePath] : []),
+      ]);
 
-      // Sync read colors on new nodes
-      await this.syncStatusColors(updatedCanvas.nodes);
-
-      // A canvas the user created by hand has no metadata block yet. Seed one
-      // named after the file, or the commands that key off it (sending papers
-      // to another canvas, Zotero sync) would refuse a canvas built entirely
-      // this way.
-      const updatedWithMeta = {
-        ...updatedCanvas,
-        citationGraphMeta: canvasData.citationGraphMeta ?? {
-          zoteroCollectionKey: "",
-          collectionName: activeFile.basename,
-          bannedPapers: [] as BannedPaper[],
-        },
-      };
-
-      await this.app.vault.modify(
-        activeFile,
-        JSON.stringify(updatedWithMeta, null, 2)
-      );
+      await this.updateCanvas<CanvasMeta>(activeFile, (canvas) => {
+        const expanded = expandCanvas(
+          canvas,
+          [paper],
+          newEdges,
+          allPapers,
+          this.settings.nodeWidth,
+          this.settings.nodeHeight
+        );
+        paintStatusColors(expanded.nodes, colors);
+        return {
+          ...expanded,
+          // A canvas the user created by hand has no metadata block yet. Seed
+          // one named after the file, or the commands that key off it (sending
+          // papers to another canvas, Zotero sync) would refuse a canvas built
+          // entirely this way.
+          citationGraphMeta: canvas.citationGraphMeta ?? {
+            zoteroCollectionKey: "",
+            collectionName: activeFile.basename,
+            bannedPapers: [] as BannedPaper[],
+          },
+        };
+      });
 
       const sourceLabel = resolved.metadataSource === "s2"
         ? ""
@@ -1213,23 +1370,26 @@ export default class CitationGraphPlugin extends Plugin {
 
       if (fetched > 0) await this.s2Cache.save();
 
-      const addedEdges = resolveNewEdges(
-        canvasData.edges,
-        new Set(canvasData.nodes.map((n) => n.id)),
-        citationEdges,
-        this.indexPapers(papers)
-      );
-
-      if (addedEdges.length > 0) {
-        await this.app.vault.modify(
-          activeFile,
-          JSON.stringify(
-            { ...canvasData, edges: [...canvasData.edges, ...addedEdges] },
-            null,
-            2
-          )
+      // Which edges are missing is decided against the canvas as it stands at
+      // write time, not against the snapshot taken before the fetch loop: that
+      // loop runs for minutes on a large canvas, and every node the user added,
+      // moved or deleted meanwhile has to survive it. The count is taken from
+      // the same pass so the notice reports what was actually written.
+      const paperIndex = this.indexPapers(papers);
+      let addedCount = 0;
+      await this.updateCanvas(activeFile, (canvas) => {
+        const addedEdges = resolveNewEdges(
+          canvas.edges,
+          new Set(canvas.nodes.map((n) => n.id)),
+          citationEdges,
+          paperIndex
         );
-      }
+        addedCount = addedEdges.length;
+        // Nodes are never touched by this command, so a run that finds no
+        // missing edge must leave the file byte-for-byte as it was.
+        if (addedEdges.length === 0) return false;
+        canvas.edges = [...canvas.edges, ...addedEdges];
+      });
 
       progress.hide();
 
@@ -1248,9 +1408,9 @@ export default class CitationGraphPlugin extends Plugin {
         );
       }
       logNotice(
-        addedEdges.length === 0
+        addedCount === 0
           ? `No missing citation edges found (${detail.join(", ")}).`
-          : `Added ${addedEdges.length} citation edge${addedEdges.length === 1 ? "" : "s"} (${detail.join(", ")}).`
+          : `Added ${addedCount} citation edge${addedCount === 1 ? "" : "s"} (${detail.join(", ")}).`
       );
     } catch (e) {
       console.error("Citation Graph: Error resolving missing edges", e);
@@ -1284,12 +1444,7 @@ export default class CitationGraphPlugin extends Plugin {
         return;
       }
 
-      const canvasData = await this.readCanvas<{
-        citationGraphMeta?: {
-          bannedPapers?: BannedPaper[];
-          [key: string]: unknown;
-        };
-      }>(canvasFile);
+      const canvasData = await this.readCanvas<CanvasMeta>(canvasFile);
 
       if (!canvasData.nodes.some((n) => n.type === "file" && n.file)) {
         logNotice("No paper nodes found on this canvas.");
@@ -1447,31 +1602,27 @@ export default class CitationGraphPlugin extends Plugin {
       );
       const { selected, banned } = await picker.pickPapers();
 
-      if (banned.length > 0) {
-        const existingBannedIds = new Set(bannedPapers.map((b) => b.id));
-        const newBanned = banned
-          .filter((p) => p.paperId && !existingBannedIds.has(p.paperId))
-          .map((p) => ({ id: p.paperId, title: p.title || "Untitled" }));
-        if (!canvasData.citationGraphMeta) {
-          (canvasData as { citationGraphMeta?: Record<string, unknown> }).citationGraphMeta = {};
-        }
-        canvasData.citationGraphMeta!.bannedPapers = [...bannedPapers, ...newBanned];
-        // Persist the ban list even when nothing was added.
-        if (selected.length === 0) {
-          await this.app.vault.modify(canvasFile, JSON.stringify(canvasData, null, 2));
-          logNotice(
-            `No papers selected. ${newBanned.length} papers marked as uninteresting.`
-          );
-          return;
-        }
-      }
+      const newBans: BannedPaper[] = banned
+        .filter((p) => p.paperId)
+        .map((p) => ({ id: p.paperId, title: p.title || "Untitled" }));
 
       if (selected.length === 0) {
-        logNotice("No papers selected.");
+        // The ban list is still worth persisting on its own.
+        if (newBans.length === 0) {
+          logNotice("No papers selected.");
+          return;
+        }
+        let added = 0;
+        await this.updateCanvas<CanvasMeta>(canvasFile, (canvas) => {
+          added = addBannedPapers(canvas, newBans);
+        });
+        logNotice(
+          `No papers selected. ${added} papers marked as uninteresting.`
+        );
         return;
       }
 
-      await this.addRecommendedPapers(canvasFile, canvasData, existingPapers, selected);
+      await this.addRecommendedPapers(canvasFile, existingPapers, selected, newBans);
     } catch (e) {
       console.error("Citation Graph: Error recommending papers", e);
       logNotice(`Error: ${e instanceof Error ? e.message : String(e)}`);
@@ -1506,9 +1657,9 @@ export default class CitationGraphPlugin extends Plugin {
   /** Create notes for accepted recommendations and place them on the canvas. */
   private async addRecommendedPapers(
     canvasFile: TFile,
-    canvasData: CanvasData & { citationGraphMeta?: Record<string, unknown> },
     existingPapers: Paper[],
     selected: VerifiedRecommendation[],
+    newBans: BannedPaper[],
   ): Promise<void> {
     logNotice(`Adding ${selected.length} papers...`);
 
@@ -1534,25 +1685,27 @@ export default class CitationGraphPlugin extends Plugin {
       );
     }
 
-    const updatedCanvas = expandCanvas(
-      canvasData,
-      newPapers,
-      newEdges,
-      this.indexPapers(counterparts),
-      this.settings.nodeWidth,
-      this.settings.nodeHeight
-    );
+    const allPapers = this.indexPapers(counterparts);
+    // Colours are resolved up front because the write itself is synchronous
+    // and cannot read notes.
+    const colors = await this.resolveStatusColors([
+      ...existingPapers.map((p) => p.notePath),
+      ...newPapers.map((p) => p.notePath),
+    ].filter((p): p is string => !!p));
 
-    await this.syncStatusColors(updatedCanvas.nodes);
-
-    await this.app.vault.modify(
-      canvasFile,
-      JSON.stringify(
-        { ...updatedCanvas, citationGraphMeta: canvasData.citationGraphMeta },
-        null,
-        2
-      )
-    );
+    await this.updateCanvas<CanvasMeta>(canvasFile, (canvas) => {
+      addBannedPapers(canvas, newBans);
+      const expanded = expandCanvas(
+        canvas,
+        newPapers,
+        newEdges,
+        allPapers,
+        this.settings.nodeWidth,
+        this.settings.nodeHeight
+      );
+      paintStatusColors(expanded.nodes, colors);
+      return { ...expanded, citationGraphMeta: canvas.citationGraphMeta };
+    });
 
     const withoutEdges = newPapers.filter(
       (p) => !newEdges.some((e) => e.fromId === p.id || e.toId === p.id)
@@ -1575,14 +1728,7 @@ export default class CitationGraphPlugin extends Plugin {
       }
 
       // 2. Read canvas and extract papers
-      const canvasData = await this.readCanvas<{
-        citationGraphMeta?: {
-          zoteroCollectionKey: string;
-          collectionName: string;
-          bannedPapers?: BannedPaper[];
-          lastDownloadPath?: string;
-        };
-      }>(activeFile);
+      const canvasData = await this.readCanvas<CanvasMeta>(activeFile);
 
       const fileNodes = canvasData.nodes.filter(
         (n) => n.type === "file" && n.file
@@ -1633,43 +1779,70 @@ export default class CitationGraphPlugin extends Plugin {
 
       // 5. Resolve the plugin's own directory, so a download fallback can
       //    locate any helper files bundled alongside the plugin.
-      const basePath = (this.app.vault.adapter as any).basePath;
-      const pluginDir = path.join(basePath, (this.manifest as any).dir);
-
-      // 6. Show download picker modal
-      const lastPath = canvasData.citationGraphMeta?.lastDownloadPath || "";
-      const modal = new DownloadPickerModal(
-        this.app,
-        modalPapers,
-        lastPath,
-      );
-      const result = await modal.pickPapers();
-      if (!result) return;
-
-      // 6. Save the download path to canvas metadata for next time
-      if (!canvasData.citationGraphMeta) {
-        (canvasData as any).citationGraphMeta = {};
+      const pluginDir = this.absolutePluginDir();
+      if (!pluginDir) {
+        logNotice(
+          "Downloading needs a vault stored in the local filesystem."
+        );
+        return;
       }
-      canvasData.citationGraphMeta!.lastDownloadPath = result.downloadPath;
-      await this.app.vault.modify(
-        activeFile,
-        JSON.stringify(canvasData, null, 2)
-      );
 
-      // 7. Download papers
-      logNotice(`Downloading ${result.papers.length} papers...`);
-      const { downloaded, failed } = await downloadPapers(
-        result.papers,
-        result.downloadPath,
+      // 6. Decide where the PDFs go, and ask which papers only when there is
+      //    a question to ask. Picking one paper and running the command is
+      //    already an answer; a modal offering that single paper back with a
+      //    checkbox beside it adds a click and no information.
+      const knownPath =
+        canvasData.citationGraphMeta?.lastDownloadPath ||
+        this.settings.defaultDownloadPath ||
+        "";
+
+      let downloadPath: string;
+      let chosenPapers: Paper[];
+      if (modalPapers.length === 1 && knownPath) {
+        downloadPath = knownPath;
+        chosenPapers = modalPapers;
+      } else {
+        const result = await new DownloadPickerModal(
+          this.app,
+          modalPapers,
+          knownPath
+        ).pickPapers();
+        if (!result) return;
+        downloadPath = result.downloadPath;
+        chosenPapers = result.papers;
+      }
+
+      // 7. Save the download path to canvas metadata for next time
+      await this.updateCanvas<CanvasMeta>(activeFile, (canvas) => {
+        (canvas.citationGraphMeta ??= {}).lastDownloadPath = downloadPath;
+      });
+
+      // 8. Download papers
+      logNotice(
+        chosenPapers.length === 1
+          ? `Downloading "${chosenPapers[0].title}"...`
+          : `Downloading ${chosenPapers.length} papers...`
+      );
+      const { downloaded, failed, resolvedArxiv } = await downloadPapers(
+        chosenPapers,
+        downloadPath,
         pluginDir,
-        (done, total, title) => {
-          logNotice(`Downloading ${done + 1}/${total}: ${title}`);
+        {
+          onProgress: (done, total, title) => {
+            logNotice(`Downloading ${done + 1}/${total}: ${title}`);
+          },
+          resolveArxiv: (paper) => this.findArxivId(paper),
         }
       );
+      await this.recordArxivIds(resolvedArxiv);
 
-      // 8. Report results
+      // 9. Report results
       if (failed.length === 0) {
-        logNotice(`Downloaded ${downloaded} papers successfully.`);
+        logNotice(
+          downloaded === 1
+            ? `Downloaded "${chosenPapers[0].title}".`
+            : `Downloaded ${downloaded} papers successfully.`
+        );
       } else {
         logNotice(
           `Downloaded ${downloaded}/${downloaded + failed.length} papers. Failed: ${failed.join(", ")}`
@@ -1701,12 +1874,7 @@ export default class CitationGraphPlugin extends Plugin {
         return;
       }
 
-      const canvasData = await this.readCanvas<{
-        citationGraphMeta?: {
-          zoteroCollectionKey: string;
-          collectionName: string;
-        };
-      }>(activeFile);
+      const canvasData = await this.readCanvas<CanvasMeta>(activeFile);
 
       // 2. Read paper metadata from all file nodes on canvas
       const fileNodes = canvasData.nodes.filter((n) => n.type === "file" && n.file);
@@ -1888,15 +2056,11 @@ export default class CitationGraphPlugin extends Plugin {
         );
 
         // Update canvas metadata with new collection key
-        if (!canvasData.citationGraphMeta) {
-          (canvasData as any).citationGraphMeta = {};
-        }
-        canvasData.citationGraphMeta!.zoteroCollectionKey = targetCollectionKey;
-        canvasData.citationGraphMeta!.collectionName = newName;
-        await this.app.vault.modify(
-          activeFile,
-          JSON.stringify(canvasData, null, 2)
-        );
+        await this.updateCanvas<CanvasMeta>(activeFile, (canvas) => {
+          const meta = (canvas.citationGraphMeta ??= {});
+          meta.zoteroCollectionKey = targetCollectionKey;
+          meta.collectionName = newName;
+        });
       }
 
       logNotice("Zotero sync complete!");
@@ -1925,14 +2089,14 @@ export default class CitationGraphPlugin extends Plugin {
         return;
       }
 
-      const canvasData = await this.readCanvas<{
-        citationGraphMeta?: Record<string, unknown>;
-      }>(canvasFile);
+      const canvasData = await this.readCanvas<CanvasMeta>(canvasFile);
+      const colors = await this.resolveStatusColors(notePathsOf(canvasData.nodes));
 
-      await this.syncStatusColors(canvasData.nodes);
-      await this.app.vault.modify(canvasFile, JSON.stringify(canvasData, null, 2));
+      await this.updateCanvas<CanvasMeta>(canvasFile, (canvas) => {
+        paintStatusColors(canvas.nodes, colors);
+      });
 
-      const papers = canvasData.nodes.filter((n) => n.type === "file" && n.file).length;
+      const papers = notePathsOf(canvasData.nodes).length;
       logNotice(`Refreshed reading status for ${papers} node${papers === 1 ? "" : "s"}.`);
     } catch (e) {
       console.error("Citation Graph: Error refreshing reading status", e);
@@ -2006,15 +2170,18 @@ export default class CitationGraphPlugin extends Plugin {
   private async applyStatusToPapers(
     targets: {
       canvasFile: TFile;
-      canvasData: CanvasData & { citationGraphMeta?: Record<string, unknown> };
+      canvasData: CanvasData & CanvasMeta;
       targetPaths: string[];
     },
     nextStatus: (current: PaperStatus) => PaperStatus
   ): Promise<number> {
-    const { canvasFile, canvasData, targetPaths } = targets;
+    const { canvasFile, targetPaths } = targets;
     const canvasDir = canvasFile.parent?.path || normalizePath(this.settings.collectionsFolder);
     const noteManager = new LiteratureNoteManager(this.app, canvasDir);
 
+    // Every note is written and its new colour worked out before the canvas is
+    // touched, because the canvas write below is synchronous.
+    const colors = new Map<string, string>();
     let updated = 0;
     let skipped = 0;
     for (const filePath of targetPaths) {
@@ -2029,11 +2196,8 @@ export default class CitationGraphPlugin extends Plugin {
       await noteManager.setStatus(noteFile, written);
       updated++;
 
-      const node = canvasData.nodes.find((n) => n.type === "file" && n.file === filePath);
-      if (node) {
-        const display: DisplayStatus = await noteManager.displayStatusFor(noteFile, written);
-        applyStatusColor(node, statusColor(this.settings, display));
-      }
+      const display: DisplayStatus = await noteManager.displayStatusFor(noteFile, written);
+      colors.set(filePath, statusColor(this.settings, display));
     }
 
     if (updated === 0) {
@@ -2048,7 +2212,9 @@ export default class CitationGraphPlugin extends Plugin {
       logNotice(`Skipped ${skipped} note${skipped === 1 ? "" : "s"} that ${skipped === 1 ? "is" : "are"} not a paper.`);
     }
 
-    await this.app.vault.modify(canvasFile, JSON.stringify(canvasData, null, 2));
+    await this.updateCanvas<CanvasMeta>(canvasFile, (canvas) => {
+      paintStatusColors(canvas.nodes, colors);
+    });
     return updated;
   }
 
@@ -2059,7 +2225,7 @@ export default class CitationGraphPlugin extends Plugin {
       // 1. Resolve the canvas and which papers to delete
       const targets = await this.resolveCanvasTargets(paths);
       if (!targets) return;
-      const { canvasFile: activeFile, canvasData, targetPaths } = targets;
+      const { canvasFile: activeFile, targetPaths } = targets;
 
       // 2. Confirmation dialog
       const displayNames = targetPaths.map((p) =>
@@ -2101,25 +2267,31 @@ export default class CitationGraphPlugin extends Plugin {
 
       if (!confirmed) return;
 
-      // 3. Compute removed node IDs and prune nodes + edges
-      const removedNodeIds = new Set<string>();
+      // 3. Collect the notes to trash
       const filesToTrash: TFile[] = [];
       for (const filePath of targetPaths) {
-        const node = canvasData.nodes.find(
-          (n) => n.type === "file" && n.file === filePath
-        );
-        if (node) removedNodeIds.add(node.id);
         const noteFile = this.app.vault.getAbstractFileByPath(filePath);
         if (noteFile instanceof TFile) filesToTrash.push(noteFile);
       }
 
-      canvasData.nodes = canvasData.nodes.filter((n) => !removedNodeIds.has(n.id));
-      canvasData.edges = canvasData.edges.filter(
-        (e) => !removedNodeIds.has(e.fromNode) && !removedNodeIds.has(e.toNode)
-      );
-
-      // 4. Write canvas first so no view references the soon-trashed files
-      await this.app.vault.modify(activeFile, JSON.stringify(canvasData, null, 2));
+      // 4. Prune nodes and edges, writing the canvas first so no view still
+      //    references the files about to be trashed. The nodes are matched by
+      //    path against the canvas as it stands now, so a node the user moved
+      //    or renumbered while the confirmation was open still goes.
+      const doomed = new Set(targetPaths);
+      let removedCount = 0;
+      await this.updateCanvas(activeFile, (canvas) => {
+        const removedNodeIds = new Set(
+          canvas.nodes
+            .filter((n) => n.type === "file" && n.file && doomed.has(n.file))
+            .map((n) => n.id)
+        );
+        removedCount = removedNodeIds.size;
+        canvas.nodes = canvas.nodes.filter((n) => !removedNodeIds.has(n.id));
+        canvas.edges = canvas.edges.filter(
+          (e) => !removedNodeIds.has(e.fromNode) && !removedNodeIds.has(e.toNode)
+        );
+      });
 
       // 5. Trash literature note files
       let trashed = 0;
@@ -2133,7 +2305,7 @@ export default class CitationGraphPlugin extends Plugin {
       }
 
       logNotice(
-        `Deleted ${removedNodeIds.size} paper${removedNodeIds.size !== 1 ? "s" : ""} (${trashed} note${trashed !== 1 ? "s" : ""} trashed).`
+        `Deleted ${removedCount} paper${removedCount !== 1 ? "s" : ""} (${trashed} note${trashed !== 1 ? "s" : ""} trashed).`
       );
     } catch (e) {
       console.error("Citation Graph: Error deleting paper", e);
@@ -2163,17 +2335,13 @@ export default class CitationGraphPlugin extends Plugin {
    */
   private getSelectedCanvasPaths(fileNodes: { file?: string }[]): string[] {
     const targetPaths: string[] = [];
-    const canvasLeaves = this.app.workspace.getLeavesOfType("canvas");
-    for (const leaf of canvasLeaves) {
-      const canvas = (leaf.view as any)?.canvas;
-      if (!canvas) continue;
-      const selection = canvas.selection;
-      if (selection && selection.size > 0) {
-        for (const selectedNode of selection) {
-          const filePath = selectedNode?.filePath || selectedNode?.file?.path;
-          if (filePath && fileNodes.some((n) => n.file === filePath)) {
-            targetPaths.push(filePath);
-          }
+    for (const leaf of this.app.workspace.getLeavesOfType("canvas")) {
+      const selection = canvasViewOf(leaf).canvas?.selection;
+      if (!selection) continue;
+      for (const selectedNode of selection) {
+        const filePath = selectedNode?.filePath || selectedNode?.file?.path;
+        if (filePath && fileNodes.some((n) => n.file === filePath)) {
+          targetPaths.push(filePath);
         }
       }
       if (targetPaths.length > 0) break;
@@ -2182,35 +2350,44 @@ export default class CitationGraphPlugin extends Plugin {
   }
 
   /**
-   * Paint canvas nodes from their notes' reading status.
+   * Work out the colour each note's canvas node should carry, and bring the
+   * note's marker class up to date while the file is open anyway.
    *
-   * This assigns for every status, clearing the color when one is not
-   * configured, so a node's color is a pure function of its note. The
-   * previous version only ever set a color, which left stale colors behind
-   * when a paper's status was changed outside the plugin.
+   * Reading happens here rather than during the write because `updateCanvas`
+   * mutates synchronously, under the vault's write lock: no note can be read
+   * once the canvas is open for writing. The map assigns a colour for every
+   * status, empty string included, so a node's colour ends up a pure function
+   * of its note instead of accumulating stale colours from earlier statuses.
+   *
+   * Notes that are not papers are left out of the map entirely, which is how
+   * `paintStatusColors` knows to leave those nodes alone.
    */
-  private async syncStatusColors(nodes: CanvasNode[]): Promise<void> {
+  private async resolveStatusColors(
+    notePaths: Iterable<string>
+  ): Promise<Map<string, string>> {
     const canvasDir = normalizePath(this.settings.collectionsFolder);
     const noteManager = new LiteratureNoteManager(this.app, canvasDir);
+    const colors = new Map<string, string>();
 
-    // Resolve every node's status concurrently: a large canvas would
-    // otherwise serialize one file read per node behind the previous one.
+    // Resolve every note concurrently: a large canvas would otherwise
+    // serialize one file read per node behind the previous one.
     await Promise.all(
-      nodes.map(async (node) => {
-        if (node.type !== "file" || !node.file) return;
-        const noteFile = this.app.vault.getAbstractFileByPath(node.file);
+      [...new Set(notePaths)].map(async (notePath) => {
+        const noteFile = this.app.vault.getAbstractFileByPath(notePath);
         if (!(noteFile instanceof TFile)) return;
         // Canvases hold the user's own notes too. Leave those completely
         // alone, including any colour they set on the node by hand.
         if (!noteManager.isPaperNote(noteFile)) return;
         const display = await noteManager.getDisplayStatus(noteFile);
-        applyStatusColor(node, statusColor(this.settings, display));
+        colors.set(notePath, statusColor(this.settings, display));
         // The label follows the colour, so nothing else needs writing. This
         // only ensures the marker class and clears stale per-status classes,
         // and is a no-op once a note is clean.
         await noteManager.syncNoteClass(noteFile);
       })
     );
+
+    return colors;
   }
 
   /** The canvas the user is working in: the active file, else any open canvas. */
@@ -2219,7 +2396,7 @@ export default class CitationGraphPlugin extends Plugin {
     if (activeFile && activeFile.extension === "canvas") return activeFile;
 
     for (const leaf of this.app.workspace.getLeavesOfType("canvas")) {
-      const file = (leaf.view as any)?.file;
+      const file = canvasViewOf(leaf).file;
       if (file instanceof TFile && file.extension === "canvas") return file;
     }
     return null;
@@ -2270,7 +2447,7 @@ export default class CitationGraphPlugin extends Plugin {
    */
   private async resolveCanvasTargets(overridePaths?: string[]): Promise<{
     canvasFile: TFile;
-    canvasData: CanvasData & { citationGraphMeta?: Record<string, unknown> };
+    canvasData: CanvasData & CanvasMeta;
     targetPaths: string[];
   } | null> {
     const canvasFile = this.findActiveCanvas();
@@ -2279,9 +2456,7 @@ export default class CitationGraphPlugin extends Plugin {
       return null;
     }
 
-    const canvasData = await this.readCanvas<{
-      citationGraphMeta?: Record<string, unknown>;
-    }>(canvasFile);
+    const canvasData = await this.readCanvas<CanvasMeta>(canvasFile);
 
     const fileNodes = canvasData.nodes.filter((n) => n.type === "file" && n.file);
     if (fileNodes.length === 0) {
@@ -2337,12 +2512,7 @@ export default class CitationGraphPlugin extends Plugin {
 
       if (!confirmed) return;
 
-      const canvasData = await this.readCanvas<{
-        citationGraphMeta?: {
-          zoteroCollectionKey: string;
-          collectionName: string;
-        };
-      }>(activeFile);
+      const canvasData = await this.readCanvas<CanvasMeta>(activeFile);
 
       const fileNodes = canvasData.nodes.filter((n) => n.type === "file" && n.file);
       if (fileNodes.length === 0) {
@@ -2403,24 +2573,21 @@ export default class CitationGraphPlugin extends Plugin {
       // Build a map from node ID → new layout for file nodes
       const newLayoutById = new Map(newNodes.map((n) => [n.id, n]));
 
-      // Update file nodes with new positions/sizes, keep non-file nodes as-is
-      const updatedNodes = canvasData.nodes.map((node) => {
-        const updated = newLayoutById.get(node.id);
-        if (updated) {
-          return { ...node, x: updated.x, y: updated.y, width: updated.width, height: updated.height };
-        }
-        return node;
+      // Colours are resolved before the canvas is opened for writing, which
+      // happens synchronously and so cannot read notes.
+      const colors = await this.resolveStatusColors(notePathsOf(canvasData.nodes));
+
+      // Move the file nodes onto their new positions and leave every other
+      // node where it is.
+      await this.updateCanvas<CanvasMeta>(activeFile, (canvas) => {
+        canvas.nodes = canvas.nodes.map((node) => {
+          const updated = newLayoutById.get(node.id);
+          return updated
+            ? { ...node, x: updated.x, y: updated.y, width: updated.width, height: updated.height }
+            : node;
+        });
+        paintStatusColors(canvas.nodes, colors);
       });
-
-      // Sync read colors from frontmatter
-      await this.syncStatusColors(updatedNodes);
-
-      const updatedCanvas = {
-        ...canvasData,
-        nodes: updatedNodes,
-      };
-
-      await this.app.vault.modify(activeFile, JSON.stringify(updatedCanvas, null, 2));
       logNotice(`Relayouted ${papers.length} papers chronologically.`);
     } catch (e) {
       console.error("Citation Graph: Error relayouting canvas", e);
@@ -2440,14 +2607,7 @@ export default class CitationGraphPlugin extends Plugin {
       }
 
       // 2. Read source canvas
-      const sourceData = await this.readCanvas<{
-        citationGraphMeta?: {
-          zoteroCollectionKey: string;
-          collectionName: string;
-          bannedPapers?: BannedPaper[];
-          lastDownloadPath?: string;
-        };
-      }>(activeFile);
+      const sourceData = await this.readCanvas<CanvasMeta>(activeFile);
 
       if (!sourceData.citationGraphMeta) {
         logNotice("This canvas is not a citation graph canvas.");
@@ -2493,22 +2653,7 @@ export default class CitationGraphPlugin extends Plugin {
       // 4. Check canvas selection first; fall back to picker modal
       let picked: { papers: Paper[]; nodeIds: Set<string> } | null = null;
 
-      const canvasLeaves = this.app.workspace.getLeavesOfType("canvas");
-      const selectedPaths: string[] = [];
-      for (const leaf of canvasLeaves) {
-        const canvas = (leaf.view as any)?.canvas;
-        if (!canvas) continue;
-        const selection = canvas.selection;
-        if (selection && selection.size > 0) {
-          for (const selectedNode of selection) {
-            const filePath = selectedNode?.filePath || selectedNode?.file?.path;
-            if (filePath && fileNodes.some((n) => n.file === filePath)) {
-              selectedPaths.push(filePath);
-            }
-          }
-        }
-        if (selectedPaths.length > 0) break;
-      }
+      const selectedPaths = this.getSelectedCanvasPaths(fileNodes);
 
       if (selectedPaths.length > 0) {
         // Use canvas-selected papers directly
@@ -2600,9 +2745,7 @@ export default class CitationGraphPlugin extends Plugin {
       if (!targetFile) return;
 
       // 8. Read target canvas
-      const targetData = await this.readCanvas<{
-        citationGraphMeta?: Record<string, unknown>;
-      }>(targetFile);
+      const targetData = await this.readCanvas<CanvasMeta>(targetFile);
 
       // 9. Compute edges to carry over.
       // The same paper can sit under different node IDs on the two canvases:
@@ -2632,7 +2775,7 @@ export default class CitationGraphPlugin extends Plugin {
         targetData.edges.map((e) => `${e.fromNode}->${e.toNode}`)
       );
 
-      const edgesToAdd = [];
+      const edgesToAdd: CanvasEdge[] = [];
       for (const edge of sourceData.edges) {
         const fromNode = toTargetId(edge.fromNode);
         const toNode = toTargetId(edge.toNode);
@@ -2683,53 +2826,59 @@ export default class CitationGraphPlugin extends Plugin {
         (p) => !hasPaperNode(p, targetNodeIds)
       );
 
-      const { updatedExisting, newNodes } = layoutNewPapers(
-        targetData.nodes,
-        trulyNewPapers,
-        allPapersMap,
-        {
-          nodeWidth: this.settings.nodeWidth,
-          nodeHeight: this.settings.nodeHeight,
-        }
+      // 11. Colours are resolved before either canvas is opened for writing,
+      //     which happens synchronously and so cannot read notes.
+      const colors = await this.resolveStatusColors(
+        trulyNewPapers.map((p) => p.notePath).filter((p): p is string => !!p)
       );
 
-      // 11. Sync read colors on new nodes
-      await this.syncStatusColors(newNodes);
+      // 12. Write updated target canvas. The layout and the duplicate-edge
+      //     check both run against the target as it stands at write time, so
+      //     anything added to it while the pickers were open survives.
+      let added = 0;
+      await this.updateCanvas<CanvasMeta>(targetFile, (canvas) => {
+        const { updatedExisting, newNodes } = layoutNewPapers(
+          canvas.nodes,
+          trulyNewPapers,
+          allPapersMap,
+          {
+            nodeWidth: this.settings.nodeWidth,
+            nodeHeight: this.settings.nodeHeight,
+          }
+        );
+        paintStatusColors(newNodes, colors);
+        added = newNodes.length;
 
-      // 12. Write updated target canvas
-      const updatedTarget = {
-        nodes: [...updatedExisting, ...newNodes],
-        edges: [...targetData.edges, ...edgesToAdd],
-        citationGraphMeta: targetData.citationGraphMeta,
-      };
-      await this.app.vault.modify(
-        targetFile,
-        JSON.stringify(updatedTarget, null, 2)
-      );
+        const present = new Set(
+          canvas.edges.map((e) => `${e.fromNode}->${e.toNode}`)
+        );
+        return {
+          ...canvas,
+          nodes: [...updatedExisting, ...newNodes],
+          edges: [
+            ...canvas.edges,
+            ...edgesToAdd.filter(
+              (e) => !present.has(`${e.fromNode}->${e.toNode}`)
+            ),
+          ],
+        };
+      });
 
       // 13. If move, update source canvas
       if (mode === "move") {
-        const remainingNodes = sourceData.nodes.filter(
-          (n) => !selectedNodeIds.has(n.id)
-        );
-        const remainingEdges = sourceData.edges.filter(
-          (e) => !selectedNodeIds.has(e.fromNode) && !selectedNodeIds.has(e.toNode)
-        );
-        const updatedSource = {
-          nodes: remainingNodes,
-          edges: remainingEdges,
-          citationGraphMeta: sourceData.citationGraphMeta,
-        };
-        await this.app.vault.modify(
-          activeFile,
-          JSON.stringify(updatedSource, null, 2)
-        );
+        await this.updateCanvas<CanvasMeta>(activeFile, (canvas) => {
+          canvas.nodes = canvas.nodes.filter((n) => !selectedNodeIds.has(n.id));
+          canvas.edges = canvas.edges.filter(
+            (e) =>
+              !selectedNodeIds.has(e.fromNode) && !selectedNodeIds.has(e.toNode)
+          );
+        });
       }
 
       // 14. Confirmation notice
       const verb = mode === "move" ? "Moved" : "Copied";
-      const skipped = picked.papers.length - trulyNewPapers.length;
-      let msg = `${verb} ${trulyNewPapers.length} paper${trulyNewPapers.length !== 1 ? "s" : ""} to ${targetFile.basename}`;
+      const skipped = picked.papers.length - added;
+      let msg = `${verb} ${added} paper${added !== 1 ? "s" : ""} to ${targetFile.basename}`;
       if (skipped > 0) msg += ` (${skipped} already existed)`;
       if (edgesToAdd.length > 0) msg += `, ${edgesToAdd.length} edge${edgesToAdd.length !== 1 ? "s" : ""} added`;
       logNotice(msg);
@@ -2750,14 +2899,7 @@ export default class CitationGraphPlugin extends Plugin {
         return;
       }
 
-      const canvasData = await this.readCanvas<{
-        citationGraphMeta?: {
-          zoteroCollectionKey: string;
-          collectionName: string;
-          bannedPapers?: BannedPaper[];
-          lastDownloadPath?: string;
-        };
-      }>(activeFile);
+      const canvasData = await this.readCanvas<CanvasMeta>(activeFile);
 
       const fileNodes = canvasData.nodes.filter(
         (n) => n.type === "file" && n.file
@@ -2891,18 +3033,25 @@ export default class CitationGraphPlugin extends Plugin {
         if (choice === null) return;
 
         if (choice === "download") {
-          const basePath = (this.app.vault.adapter as any).basePath;
-          const pluginDir = path.join(basePath, (this.manifest as any).dir);
+          const pluginDir = this.absolutePluginDir();
+          if (!pluginDir) {
+            logNotice("Downloading needs a vault stored in the local filesystem.");
+            return;
+          }
 
           logNotice(`Downloading ${missingPdf.length} PDF${missingPdf.length > 1 ? "s" : ""}...`);
-          await downloadPapers(
+          const { resolvedArxiv } = await downloadPapers(
             missingPdf,
             downloadDir,
             pluginDir,
-            (done, total, title) => {
-              logNotice(`Downloading ${done + 1}/${total}: ${title}`);
+            {
+              onProgress: (done, total, title) => {
+                logNotice(`Downloading ${done + 1}/${total}: ${title}`);
+              },
+              resolveArxiv: (paper) => this.findArxivId(paper),
             },
           );
+          await this.recordArxivIds(resolvedArxiv);
 
           // Re-resolve paths for the ones we tried to download
           for (const paper of missingPdf) {
@@ -3004,19 +3153,23 @@ export default class CitationGraphPlugin extends Plugin {
           continue;
         }
 
-        // Insert summary into note (re-read content each time)
+        // Insert the summary into the note. The read and the write happen
+        // together under the vault's write lock: a single call can take
+        // minutes, and anything the user typed into the note meanwhile would
+        // otherwise be overwritten by a stale copy.
         const noteFile = this.app.vault.getAbstractFileByPath(paper.notePath!);
         if (!(noteFile instanceof TFile)) {
           progressModal.logItem(paper.title, false);
           failed++;
           continue;
         }
-        const noteContent = await this.app.vault.read(noteFile);
-        const hasSummary = hasSummarySection(noteContent);
-        const mode = hasSummary ? batchSummaryMode : "new";
-
-        const updatedContent = insertSummaryText(noteContent, result.text, mode);
-        await this.app.vault.modify(noteFile, updatedContent);
+        await this.app.vault.process(noteFile, (noteContent) =>
+          insertSummaryText(
+            noteContent,
+            result.text,
+            hasSummarySection(noteContent) ? batchSummaryMode : "new"
+          )
+        );
         completed++;
         progressModal.logItem(paper.title, true);
       } catch (e) {

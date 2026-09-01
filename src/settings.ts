@@ -1,4 +1,5 @@
-import { App, PluginSettingTab, Setting, AbstractInputSuggest, TFolder, TFile, Modal } from "obsidian";
+import { App, PluginSettingTab, Setting, AbstractInputSuggest, TFolder, TFile, Modal, Notice } from "obsidian";
+import { parseCanvasData } from "./canvas/parse";
 import type CitationGraphPlugin from "./main";
 import type { BannedPaper, CitationGraphSettings, DisplayStatus, StatusColor } from "./types";
 import { LLM_PROVIDER_ENV_VAR, STATUS_LABELS, isCustomColor, parseStatusColor } from "./types";
@@ -600,18 +601,15 @@ export class CitationGraphSettingTab extends PluginSettingTab {
           const cgCanvases: TFile[] = [];
           for (const file of canvasFiles) {
             try {
-              const content = await this.app.vault.read(file);
-              const data = JSON.parse(content);
-              if (data.citationGraphMeta) {
-                cgCanvases.push(file);
-              }
+              const data = await readCanvasMeta(this.app, file);
+              if (data.citationGraphMeta) cgCanvases.push(file);
             } catch {
-              // skip non-JSON or broken files
+              // A canvas that is not readable JSON is simply not one of ours.
             }
           }
 
           if (cgCanvases.length === 0) {
-            new (await import("obsidian")).Notice("No citation graph canvases found.");
+            new Notice("No citation graph canvases found.");
             return;
           }
 
@@ -683,27 +681,36 @@ class BannedPapersManagerModal extends Modal {
   private async loadBannedPapers(): Promise<void> {
     if (!this.selectedCanvas) return;
     try {
-      const content = await this.app.vault.read(this.selectedCanvas);
-      const data = JSON.parse(content);
-      this.bannedPapers = data.citationGraphMeta?.bannedPapers || [];
-    } catch {
+      const data = await readCanvasMeta(this.app, this.selectedCanvas);
+      this.bannedPapers = data.citationGraphMeta?.bannedPapers ?? [];
+    } catch (e) {
+      console.error("Citation Graph: could not read banned papers", e);
       this.bannedPapers = [];
+      new Notice("Could not read this canvas. Its banned papers are not shown.");
     }
   }
 
-  private async saveBannedPapers(): Promise<void> {
-    if (!this.selectedCanvas) return;
+  /**
+   * Drop one paper from the ban list.
+   *
+   * The removal is replayed against the canvas as it stands rather than a
+   * whole list written back over it, so a ban added from a command while this
+   * modal was open is not undone by the next click here.
+   */
+  private async removeBannedPaper(id: string): Promise<void> {
+    const canvas = this.selectedCanvas;
+    if (!canvas) return;
     try {
-      const content = await this.app.vault.read(this.selectedCanvas);
-      const data = JSON.parse(content);
-      if (!data.citationGraphMeta) data.citationGraphMeta = {};
-      data.citationGraphMeta.bannedPapers = this.bannedPapers;
-      await this.app.vault.modify(
-        this.selectedCanvas,
-        JSON.stringify(data, null, 2)
-      );
+      await this.app.vault.process(canvas, (raw) => {
+        const data = parseCanvasData<CanvasMetaHolder>(raw, canvas.path);
+        const meta = (data.citationGraphMeta ??= {});
+        meta.bannedPapers = (meta.bannedPapers ?? []).filter((p) => p.id !== id);
+        return JSON.stringify(data, null, 2);
+      });
+      await this.loadBannedPapers();
     } catch (e) {
-      console.error("Citation Graph: Failed to save banned papers", e);
+      console.error("Citation Graph: could not save banned papers", e);
+      new Notice("Could not update this canvas. The paper is still banned.");
     }
   }
 
@@ -753,10 +760,22 @@ class BannedPapersManagerModal extends Modal {
         cls: "citation-graph-banned-remove",
       });
       removeBtn.addEventListener("click", async () => {
-        this.bannedPapers = this.bannedPapers.filter((p) => p.id !== paper.id);
-        await this.saveBannedPapers();
+        await this.removeBannedPaper(paper.id);
         this.renderList();
       });
     }
   }
+}
+
+/** The plugin's own block inside a .canvas file, as this tab reads it. */
+interface CanvasMetaHolder {
+  citationGraphMeta?: { bannedPapers?: BannedPaper[] };
+}
+
+/**
+ * Read a canvas's plugin metadata. Goes through `parseCanvasData` so a
+ * brand-new (zero-byte) canvas reads as an empty one rather than throwing.
+ */
+async function readCanvasMeta(app: App, file: TFile): Promise<CanvasMetaHolder> {
+  return parseCanvasData<CanvasMetaHolder>(await app.vault.read(file), file.path);
 }

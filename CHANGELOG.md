@@ -6,6 +6,22 @@ Each released version here is also the body of the matching [GitHub release](htt
 
 ## [Unreleased]
 
+### Added
+
+- *Download* now searches arXiv before telling you a paper has no source. A paper added by the DOI of its published version usually carries no arXiv ID, because Semantic Scholar files the preprint and the journal article as two unrelated records, and it used to be greyed out in the download window even when the preprint was sitting on arXiv. Such a paper is now shown as `no ID yet` and stays selectable; selecting it makes the download run look it up, through the arXiv-minted DOI, then OpenAlex's record of where the DOI is hosted, then a title search on arXiv itself. An ID found this way is written into the note's frontmatter, so the next run has it already. A title search hit whose title is not the same paper is rejected rather than downloaded.
+
+### Changed
+
+- Downloading a single paper no longer opens a window to ask which paper. Selecting one node and running *PDFs: download* downloads it, as long as a folder is already known from the canvas's last download or the *Default download path* setting. The picker still appears for several papers, or when no folder has been set yet.
+- Reading-status colours, frame widths and the fade on abandoned papers are now defined in the plugin's stylesheet rather than generated in JavaScript, so a theme or a CSS snippet can restyle them. What the plugin generates at runtime is only the mapping from your chosen colours to the statuses they stand for.
+
+### Fixed
+
+- Long-running commands no longer discard work done while they ran. *Resolve missing citation edges*, *Expand paper*, *Recommend papers* and *Write summary* can each spend minutes waiting on Semantic Scholar or a language model, and each used to save a copy of the canvas or note taken before that wait: a node you added, moved or deleted in the meantime was silently reverted, and text typed into a note being summarised was overwritten. Every canvas and note write now re-reads the file and applies its change to what is actually there.
+- Removing a paper from the banned list in the settings no longer restores bans added elsewhere while the manager was open.
+- Building a canvas from a large collection is much faster in a large vault. Matching each paper against existing notes used to walk every note in the vault twice, once per paper.
+- The plugin's log file is written through Obsidian rather than directly to disk, and a failure to write it is now reported in the developer console instead of passing unnoticed.
+
 ## [0.3.0] - 2026-09-01
 
 ### Added
