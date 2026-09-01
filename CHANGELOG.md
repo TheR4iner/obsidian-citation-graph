@@ -6,6 +6,8 @@ Each released version here is also the body of the matching [GitHub release](htt
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-09-01
+
 ### Added
 
 - *Download* now searches arXiv before telling you a paper has no source. A paper added by the DOI of its published version usually carries no arXiv ID, because Semantic Scholar files the preprint and the journal article as two unrelated records, and it used to be greyed out in the download window even when the preprint was sitting on arXiv. Such a paper is now shown as `no ID yet` and stays selectable; selecting it makes the download run look it up, through the arXiv-minted DOI, then OpenAlex's record of where the DOI is hosted, then a title search on arXiv itself. An ID found this way is written into the note's frontmatter, so the next run has it already. A title search hit whose title is not the same paper is rejected rather than downloaded.
@@ -89,7 +91,8 @@ First public release.
 - **Sync canvas to Zotero**, **Send papers to canvas**, **Relayout canvas**, **Delete paper**, and **Clear Semantic Scholar cache**.
 - Settings for the collections folder, the Zotero and Semantic Scholar API keys, node size, the five status colours, and the full LLM configuration.
 
-[Unreleased]: https://github.com/TheR4iner/obsidian-citation-graph/compare/0.3.0...HEAD
+[Unreleased]: https://github.com/TheR4iner/obsidian-citation-graph/compare/0.4.0...HEAD
+[0.4.0]: https://github.com/TheR4iner/obsidian-citation-graph/compare/0.3.0...0.4.0
 [0.3.0]: https://github.com/TheR4iner/obsidian-citation-graph/compare/0.2.1...0.3.0
 [0.2.1]: https://github.com/TheR4iner/obsidian-citation-graph/compare/0.2.0...0.2.1
 [0.2.0]: https://github.com/TheR4iner/obsidian-citation-graph/compare/0.1.0...0.2.0
