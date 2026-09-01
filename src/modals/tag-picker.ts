@@ -236,7 +236,7 @@ export class TagPickerModal extends Modal {
   }
 
   onClose(): void {
-    setTimeout(() => {
+    window.setTimeout(() => {
       if (this.resolvePromise && !this.resolved) {
         this.resolved = true;
         this.resolvePromise(null);

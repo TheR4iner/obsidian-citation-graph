@@ -110,7 +110,7 @@ export class CitationGraphSettingTab extends PluginSettingTab {
       .addText((text) => {
         new FolderSuggest(this.app, text.inputEl);
         text
-          .setPlaceholder("collections (empty = vault root)")
+          .setPlaceholder("Collections (empty = vault root)")
           .setValue(this.plugin.settings.collectionsFolder)
           .onChange(async (value) => {
             // An empty value is meaningful: it means the vault root. Only the
@@ -645,7 +645,7 @@ class BannedPapersManagerModal extends Modal {
       .setDesc("Select a citation graph canvas");
 
     selectorRow.addDropdown((dropdown) => {
-      dropdown.addOption("", "— Select canvas —");
+      dropdown.addOption("", "Select a canvas");
       for (const file of this.canvasFiles) {
         dropdown.addOption(file.path, file.basename);
       }
