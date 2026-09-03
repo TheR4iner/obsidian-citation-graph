@@ -220,7 +220,7 @@ async function callAnthropic(
 		throw new Error("Anthropic API key is not configured. Set it in the plugin settings.");
 	}
 
-	const model = settings.llmModel || DEFAULT_MODELS.anthropic;
+	const model = effectiveModel(settings);
 
 	const content: Record<string, unknown>[] = [];
 	if (request.pdfPath) {
@@ -288,7 +288,7 @@ async function callOpenAI(
 		throw new Error("OpenAI API key is not configured. Set it in the plugin settings.");
 	}
 
-	const model = settings.llmModel || DEFAULT_MODELS.openai;
+	const model = effectiveModel(settings);
 
 	const content: Record<string, unknown>[] = [];
 	if (request.pdfPath) {
@@ -349,7 +349,7 @@ async function callGoogle(
 		throw new Error("Google Gemini API key is not configured. Set it in the plugin settings.");
 	}
 
-	const model = settings.llmModel || DEFAULT_MODELS.google;
+	const model = effectiveModel(settings);
 
 	const parts: Record<string, unknown>[] = [];
 	if (request.pdfPath) {
@@ -583,7 +583,7 @@ function callClaudeCli(
 	const executable = resolveClaudeCliPath(settings);
 	// Honour the configured model; the hardcoded default applies only when the
 	// Model setting is blank.
-	const model = settings.llmModel || DEFAULT_MODELS["claude-cli"];
+	const model = effectiveModel(settings);
 
 	const args = ["-p", "--model", model, "--output-format", "stream-json", "--verbose"];
 	// In print mode a tool the user has not allowed is auto-denied rather than

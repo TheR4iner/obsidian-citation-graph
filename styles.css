@@ -463,11 +463,6 @@
   margin-bottom: 4px;
 }
 
-.citation-graph-download-path-input-row {
-  display: flex;
-  gap: 8px;
-}
-
 .citation-graph-download-path-input {
   flex: 1;
   padding: 6px 10px;

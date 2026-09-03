@@ -885,7 +885,7 @@ export default class CitationGraphPlugin extends Plugin {
       }
 
       // 6. Determine which papers are already on canvas (by S2 ID or DOI)
-      const canvasPapers = this.canvasPapers(canvasData);
+      const canvasPapers = this.papersOnNodes(canvasData.nodes);
       const existingS2Ids = this.canvasPaperIds(canvasPapers);
 
       // 7. Show expand picker (filter out banned papers)
@@ -1081,7 +1081,7 @@ export default class CitationGraphPlugin extends Plugin {
       // 6. Build edges to existing papers via resolved refs/citations.
       // Matches by S2 ID, DOI (case-insensitive), and arXiv ID, since fallback
       // sources (OpenAlex/CrossRef/arXiv) don't always provide an S2 ID.
-      const canvasPapers = this.canvasPapers(canvasData);
+      const canvasPapers = this.papersOnNodes(canvasData.nodes);
       const newEdges = this.buildCitationEdges(
         paper,
         resolved.references,
@@ -1161,12 +1161,7 @@ export default class CitationGraphPlugin extends Plugin {
     return fm ? paperFromFrontmatter(fm, node.id, node.file) : null;
   }
 
-  /** Every canvas node that points at a literature note, read back as a Paper. */
-  private canvasPapers(canvasData: CanvasData): Paper[] {
-    return this.papersOnNodes(canvasData.nodes);
-  }
-
-  /** The same, for a list of nodes already filtered by the caller. */
+  /** Every node in a list that points at a literature note, read back as a Paper. */
   private papersOnNodes(nodes: CanvasNode[]): Paper[] {
     return nodes
       .map((node) => this.paperFromNode(node))
@@ -1258,7 +1253,7 @@ export default class CitationGraphPlugin extends Plugin {
 
       const canvasData = await this.readCanvas(activeFile);
 
-      const papers = this.canvasPapers(canvasData);
+      const papers = this.papersOnNodes(canvasData.nodes);
       if (papers.length < 2) {
         logNotice(
           "This canvas has fewer than two papers, so there are no edges to resolve."
@@ -1409,7 +1404,7 @@ export default class CitationGraphPlugin extends Plugin {
         return;
       }
 
-      const existingPapers = this.canvasPapers(canvasData);
+      const existingPapers = this.papersOnNodes(canvasData.nodes);
       if (existingPapers.length === 0) {
         logNotice(
           "The notes behind this canvas have no frontmatter, so there is nothing to describe to the model."
@@ -3160,7 +3155,6 @@ class DoiInputModal extends PromiseModal<string | null> {
 
     window.setTimeout(() => input.focus(), 50);
   }
-
 }
 
 // ─── Helpers ────────────────────────────────────────────────
