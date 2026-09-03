@@ -13,18 +13,32 @@
  */
 export class RateLimiter {
   private lastRequestTime = 0;
+  /**
+   * Resolves once the previous caller has claimed its slot.
+   *
+   * Without it, two callers arriving inside the interval both read the same
+   * `lastRequestTime`, both sleep the same amount and both fire at the same
+   * instant, which is precisely what the limiter exists to prevent. That is
+   * not hypothetical here: `resolvePaperWithRefs` asks OpenAlex for references
+   * and citations through one client in a single `Promise.all`.
+   */
+  private slot: Promise<void> = Promise.resolve();
 
   /** @param minInterval Minimum milliseconds between two calls. */
   constructor(private readonly minInterval: number) {}
 
   /** Run `fn` no sooner than `minInterval` after the previous call started. */
-  async run<T>(fn: () => Promise<T>): Promise<T> {
-    const elapsed = Date.now() - this.lastRequestTime;
-    if (elapsed < this.minInterval) {
+  run<T>(fn: () => Promise<T>): Promise<T> {
+    // The queue advances when a slot is claimed, not when `fn` settles, so
+    // calls start `minInterval` apart but are still in flight together. A slow
+    // request must not hold up the next one.
+    const claimed = this.slot.then(async () => {
+      const elapsed = Date.now() - this.lastRequestTime;
       // `sleep` is a global supplied by Obsidian's runtime (obsidian.d.ts).
-      await sleep(this.minInterval - elapsed);
-    }
-    this.lastRequestTime = Date.now();
-    return fn();
+      if (elapsed < this.minInterval) await sleep(this.minInterval - elapsed);
+      this.lastRequestTime = Date.now();
+    });
+    this.slot = claimed;
+    return claimed.then(fn);
   }
 }
