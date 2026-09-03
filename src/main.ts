@@ -52,12 +52,8 @@ import { SendPickerModal } from "./modals/send-picker";
 import { RecommendPromptModal } from "./modals/recommend-prompt-modal";
 import { RecommendPickerModal } from "./modals/recommend-picker";
 import { StatusPickerModal } from "./modals/status-picker";
-import {
-  BatchMissingPdfModal,
-  BatchLongPaperWarningModal,
-  BatchSummaryModeModal,
-} from "./modals/batch-summary-modals";
 import { PromiseModal } from "./modals/promise-modal";
+import { askChoice } from "./modals/choice-modal";
 import type { BannedPaper } from "./types";
 import { LiteratureNoteManager, readFrontmatterArxiv } from "./notes/literature";
 import { hasSummarySection, insertSummaryText } from "./notes/summary-text";
@@ -2938,7 +2934,16 @@ export default class CitationGraphPlugin extends Plugin {
           "and no default download path configured. Skipping those."
         );
       } else {
-        const choice = await new BatchMissingPdfModal(this.app, missingPdf).pick();
+        const choice = await askChoice<"download" | "skip" | null>(this.app, {
+          title: "PDFs not found",
+          question: `${missingPdf.length} paper${missingPdf.length > 1 ? "s do" : " does"} not have a downloaded PDF:`,
+          items: missingPdf.map((p) => p.title),
+          choices: [
+            { text: "Download all", value: "download", cta: true },
+            { text: "Skip these", value: "skip" },
+          ],
+          cancelled: null,
+        });
         if (choice === null) return;
 
         if (choice === "download") {
@@ -3012,7 +3017,14 @@ export default class CitationGraphPlugin extends Plugin {
     }
 
     if (longPapers.length > 0) {
-      const proceed = await new BatchLongPaperWarningModal(this.app, longPapers).pick();
+      const proceed = await askChoice<boolean>(this.app, {
+        title: "Long paper warning",
+        question:
+          "The following papers are long and may take extra time and tokens to summarize:",
+        items: longPapers.map(({ title, pages }) => `${title} (~${pages} pages)`),
+        choices: [{ text: "Proceed with all", value: true, cta: true }],
+        cancelled: false,
+      });
       if (!proceed) return;
     }
 
@@ -3028,9 +3040,15 @@ export default class CitationGraphPlugin extends Plugin {
     }
 
     if (withSummaryCount > 0) {
-      const choice = await new BatchSummaryModeModal(
-        this.app, withSummaryCount, resolved.length
-      ).pick();
+      const choice = await askChoice<"append" | "replace" | null>(this.app, {
+        title: "Existing summaries found",
+        question: `${withSummaryCount} of ${resolved.length} selected paper${resolved.length > 1 ? "s" : ""} already have a Summary section. How should existing summaries be handled?`,
+        choices: [
+          { text: "Append (with separator)", value: "append", cta: true },
+          { text: "Replace", value: "replace", warning: true },
+        ],
+        cancelled: null,
+      });
       if (choice === null) return;
       batchSummaryMode = choice;
     }
