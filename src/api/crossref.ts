@@ -1,30 +1,20 @@
 import { requestUrl } from "obsidian";
 import type { S2Paper } from "../types";
 import { asNumber, asRecord, asRecordArray, asString, pick } from "./json";
+import { RateLimiter } from "./rate-limit";
 
 const BASE = "https://api.crossref.org";
 
 /** Rate-limited CrossRef API client (references only, no public citation API) */
 export class CrossRefClient {
-  private lastRequestTime = 0;
   /** 200ms between requests */
-  private readonly minInterval = 200;
+  private readonly limiter = new RateLimiter(200);
 
   constructor(private email: string = "") {}
 
   /** Adopt a contact email entered after the client was created. */
   setEmail(email: string): void {
     this.email = email;
-  }
-
-  private async rateLimitedRequest<T>(fn: () => Promise<T>): Promise<T> {
-    const now = Date.now();
-    const elapsed = now - this.lastRequestTime;
-    if (elapsed < this.minInterval) {
-      await sleep(this.minInterval - elapsed);
-    }
-    this.lastRequestTime = Date.now();
-    return fn();
   }
 
   /**
@@ -50,7 +40,7 @@ export class CrossRefClient {
   }
 
   private async fetchWork(doi: string): Promise<Record<string, unknown> | null> {
-    return this.rateLimitedRequest(async () => {
+    return this.limiter.run(async () => {
       try {
         let url = `${BASE}/works/${encodeURIComponent(doi)}`;
         if (this.email) url += `?mailto=${encodeURIComponent(this.email)}`;
@@ -133,8 +123,4 @@ function mapCrossRefToS2Paper(ref: Record<string, unknown>): S2Paper {
     abstract: null,
     citationCount: null,
   };
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => window.setTimeout(resolve, ms));
 }

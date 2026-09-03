@@ -13,11 +13,7 @@ const TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
  * the prototype of every object in the plugin.
  */
 function nullProtoRecord<T>(source?: Record<string, T>): Record<string, T> {
-	const out = Object.create(null) as Record<string, T>;
-	if (source) {
-		for (const key of Object.keys(source)) out[key] = source[key];
-	}
-	return out;
+	return Object.assign(Object.create(null) as Record<string, T>, source);
 }
 
 function emptyCache(): S2CacheData {

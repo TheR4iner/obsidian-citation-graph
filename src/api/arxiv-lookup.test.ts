@@ -5,7 +5,7 @@ import {
 	arxivIdFromDoi,
 	arxivIdFromUrl,
 	findArxivId,
-	titlesMatch,
+	titlesIdentical,
 } from "./arxiv-lookup";
 import type { ArxivMetadataClient } from "./arxiv-metadata";
 import type { OpenAlexClient } from "./openalex";
@@ -89,18 +89,18 @@ describe("arxivIdFromUrl", () => {
 	});
 });
 
-describe("titlesMatch", () => {
+describe("titlesIdentical", () => {
 	it("ignores case, punctuation and spacing", () => {
-		expect(titlesMatch("Attention Is All You Need", "attention is all you need.")).toBe(true);
-		expect(titlesMatch("Non-Local Neural Networks", "Non Local Neural Networks")).toBe(true);
+		expect(titlesIdentical("Attention Is All You Need", "attention is all you need.")).toBe(true);
+		expect(titlesIdentical("Non-Local Neural Networks", "Non Local Neural Networks")).toBe(true);
 	});
 
 	it("rejects a prefix, which is a different paper", () => {
-		expect(titlesMatch("Attention Is All You Need", "Attention Is All You Need II")).toBe(false);
+		expect(titlesIdentical("Attention Is All You Need", "Attention Is All You Need II")).toBe(false);
 	});
 
 	it("rejects two empty titles rather than calling them equal", () => {
-		expect(titlesMatch("", "")).toBe(false);
+		expect(titlesIdentical("", "")).toBe(false);
 	});
 });
 

@@ -16,5 +16,7 @@ export default defineConfig({
 	test: {
 		include: ["src/**/*.test.ts"],
 		environment: "node",
+		// Installs the globals Obsidian's runtime provides but node does not.
+		setupFiles: [fileURLToPath(new URL("./test/setup.ts", import.meta.url))],
 	},
 });

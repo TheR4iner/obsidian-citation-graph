@@ -52,11 +52,8 @@ import { SendPickerModal } from "./modals/send-picker";
 import { RecommendPromptModal } from "./modals/recommend-prompt-modal";
 import { RecommendPickerModal } from "./modals/recommend-picker";
 import { StatusPickerModal } from "./modals/status-picker";
-import {
-  BatchMissingPdfModal,
-  BatchLongPaperWarningModal,
-  BatchSummaryModeModal,
-} from "./modals/batch-summary-modals";
+import { PromiseModal } from "./modals/promise-modal";
+import { askChoice } from "./modals/choice-modal";
 import type { BannedPaper } from "./types";
 import { LiteratureNoteManager, readFrontmatterArxiv } from "./notes/literature";
 import { hasSummarySection, insertSummaryText } from "./notes/summary-text";
@@ -224,121 +221,82 @@ export default class CitationGraphPlugin extends Plugin {
     this.arxivClient = new ArxivMetadataClient();
     this.applyApiCredentials();
 
-    this.addCommand({
-      id: "create-from-collection",
-      name: "Canvas: create from collection",
-      callback: () => this.createFromCollection(),
-    });
-
-    this.addCommand({
-      id: "create-from-tag",
-      name: "Canvas: create from tag",
-      callback: () => this.createFromTag(),
-    });
-
-    this.addCommand({
-      id: "expand-paper",
-      name: "Papers: expand paper",
-      checkCallback: this.canvasCommand(() => this.expandPaper()),
-    });
-
-    this.addCommand({
-      id: "expand-paper-refresh",
-      name: "Papers: expand paper (force refresh)",
-      checkCallback: this.canvasCommand(() => this.expandPaper({ forceRefresh: true })),
-    });
-
-    this.addCommand({
-      id: "clear-s2-cache",
-      name: "Maintenance: clear Semantic Scholar cache",
-      callback: async () => {
-        this.s2Cache.clear();
-        await this.s2Cache.save();
-        new Notice("Semantic Scholar cache cleared.");
-      },
-    });
-
-    this.addCommand({
-      id: "relayout-canvas",
-      name: "Canvas: relayout",
-      checkCallback: this.canvasCommand(() => this.relayoutCanvas()),
-    });
-
-    this.addCommand({
-      id: "resolve-missing-edges",
-      name: "Canvas: resolve missing citation edges",
-      checkCallback: this.canvasCommand(() => this.resolveMissingEdges()),
-    });
-
-    this.addCommand({
-      id: "resolve-missing-edges-refresh",
-      name: "Canvas: resolve missing citation edges (force refresh)",
-      checkCallback: this.canvasCommand(() =>
-        this.resolveMissingEdges({ forceRefresh: true })
-      ),
-    });
-
-    this.addCommand({
-      id: "sync-to-zotero",
-      name: "Canvas: sync to Zotero",
-      checkCallback: this.canvasCommand(() => this.syncToZotero()),
-    });
-
-    this.addCommand({
-      id: "download-papers",
-      name: "PDFs: download",
-      checkCallback: this.canvasCommand(() => this.downloadPapersFromCanvas()),
-    });
-
-    this.addCommand({
-      id: "add-paper-by-doi",
-      name: "Papers: add by DOI or arXiv",
-      checkCallback: this.canvasCommand(() => this.addPaperByDoi()),
-    });
-
-    this.addCommand({
-      id: "refresh-reading-status",
-      name: "Reading: refresh reading status",
-      checkCallback: this.canvasCommand(() => this.refreshReadingStatus()),
-    });
-
-    this.addCommand({
-      id: "set-paper-status",
-      name: "Reading: set paper status",
-      checkCallback: this.canvasCommand(() => this.setPaperStatus()),
-    });
-
-    this.addCommand({
-      id: "toggle-read-status",
-      name: "Reading: cycle reading status",
-      checkCallback: this.canvasCommand(() => this.cycleReadingStatus()),
-    });
-
-    this.addCommand({
-      id: "send-papers-to-canvas",
-      name: "Canvas: send papers to another canvas",
-      checkCallback: this.canvasCommand(() => this.sendPapersToCanvas()),
-    });
-
-    this.addCommand({
-      id: "write-summary",
-      name: "PDFs: write summary",
-      checkCallback: this.canvasCommand(() => this.writeSummary()),
-    });
-
-    this.addCommand({
-      id: "recommend-papers",
-      name: "Papers: recommend papers",
-      checkCallback: this.canvasCommand(() => this.recommendPapers()),
-    });
-
-    this.addCommand({
-      id: "delete-paper",
-      name: "Papers: delete paper",
-      checkCallback: this.canvasCommand(() => this.deletePaper()),
-    });
-
+    this.registerCommands();
     this.registerPaperContextMenu();
+  }
+
+  /**
+   * Register every command in the palette.
+   *
+   * Two tables rather than eighteen near-identical blocks: the first holds the
+   * commands that need a canvas open and so go through `canvasCommand`, the
+   * second the ones that work anywhere. Adding a command means adding a row,
+   * which is also what stops a new one from quietly missing the canvas guard.
+   */
+  private registerCommands(): void {
+    const canvasCommands: Array<[id: string, name: string, run: () => unknown]> = [
+      ["expand-paper", "Papers: expand paper", () => this.expandPaper()],
+      [
+        "expand-paper-refresh",
+        "Papers: expand paper (force refresh)",
+        () => this.expandPaper({ forceRefresh: true }),
+      ],
+      ["relayout-canvas", "Canvas: relayout", () => this.relayoutCanvas()],
+      [
+        "resolve-missing-edges",
+        "Canvas: resolve missing citation edges",
+        () => this.resolveMissingEdges(),
+      ],
+      [
+        "resolve-missing-edges-refresh",
+        "Canvas: resolve missing citation edges (force refresh)",
+        () => this.resolveMissingEdges({ forceRefresh: true }),
+      ],
+      ["sync-to-zotero", "Canvas: sync to Zotero", () => this.syncToZotero()],
+      ["download-papers", "PDFs: download", () => this.downloadPapersFromCanvas()],
+      ["add-paper-by-doi", "Papers: add by DOI or arXiv", () => this.addPaperByDoi()],
+      [
+        "refresh-reading-status",
+        "Reading: refresh reading status",
+        () => this.refreshReadingStatus(),
+      ],
+      ["set-paper-status", "Reading: set paper status", () => this.setPaperStatus()],
+      ["toggle-read-status", "Reading: cycle reading status", () => this.cycleReadingStatus()],
+      [
+        "send-papers-to-canvas",
+        "Canvas: send papers to another canvas",
+        () => this.sendPapersToCanvas(),
+      ],
+      ["write-summary", "PDFs: write summary", () => this.writeSummary()],
+      ["recommend-papers", "Papers: recommend papers", () => this.recommendPapers()],
+      ["delete-paper", "Papers: delete paper", () => this.deletePaper()],
+    ];
+
+    for (const [id, name, run] of canvasCommands) {
+      this.addCommand({ id, name, checkCallback: this.canvasCommand(run) });
+    }
+
+    const anywhereCommands: Array<[id: string, name: string, run: () => unknown]> = [
+      [
+        "create-from-collection",
+        "Canvas: create from collection",
+        () => this.createFromCollection(),
+      ],
+      ["create-from-tag", "Canvas: create from tag", () => this.createFromTag()],
+      [
+        "clear-s2-cache",
+        "Maintenance: clear Semantic Scholar cache",
+        async () => {
+          this.s2Cache.clear();
+          await this.s2Cache.save();
+          new Notice("Semantic Scholar cache cleared.");
+        },
+      ],
+    ];
+
+    for (const [id, name, callback] of anywhereCommands) {
+      this.addCommand({ id, name, callback });
+    }
   }
 
   /**
@@ -927,7 +885,7 @@ export default class CitationGraphPlugin extends Plugin {
       }
 
       // 6. Determine which papers are already on canvas (by S2 ID or DOI)
-      const canvasPapers = this.canvasPapers(canvasData);
+      const canvasPapers = this.papersOnNodes(canvasData.nodes);
       const existingS2Ids = this.canvasPaperIds(canvasPapers);
 
       // 7. Show expand picker (filter out banned papers)
@@ -1063,10 +1021,7 @@ export default class CitationGraphPlugin extends Plugin {
       }
 
       // 2. Prompt for DOI or arxiv ID
-      const rawInput = await new Promise<string | null>((resolve) => {
-        const modal = new DoiInputModal(this.app, resolve);
-        modal.open();
-      });
+      const rawInput = await new DoiInputModal(this.app).askForIdentifier();
       if (!rawInput) return;
 
       // 3. Parse input: DOI URL, arxiv DOI, arxiv ID, or plain DOI
@@ -1126,7 +1081,7 @@ export default class CitationGraphPlugin extends Plugin {
       // 6. Build edges to existing papers via resolved refs/citations.
       // Matches by S2 ID, DOI (case-insensitive), and arXiv ID, since fallback
       // sources (OpenAlex/CrossRef/arXiv) don't always provide an S2 ID.
-      const canvasPapers = this.canvasPapers(canvasData);
+      const canvasPapers = this.papersOnNodes(canvasData.nodes);
       const newEdges = this.buildCitationEdges(
         paper,
         resolved.references,
@@ -1206,12 +1161,7 @@ export default class CitationGraphPlugin extends Plugin {
     return fm ? paperFromFrontmatter(fm, node.id, node.file) : null;
   }
 
-  /** Every canvas node that points at a literature note, read back as a Paper. */
-  private canvasPapers(canvasData: CanvasData): Paper[] {
-    return this.papersOnNodes(canvasData.nodes);
-  }
-
-  /** The same, for a list of nodes already filtered by the caller. */
+  /** Every node in a list that points at a literature note, read back as a Paper. */
   private papersOnNodes(nodes: CanvasNode[]): Paper[] {
     return nodes
       .map((node) => this.paperFromNode(node))
@@ -1303,7 +1253,7 @@ export default class CitationGraphPlugin extends Plugin {
 
       const canvasData = await this.readCanvas(activeFile);
 
-      const papers = this.canvasPapers(canvasData);
+      const papers = this.papersOnNodes(canvasData.nodes);
       if (papers.length < 2) {
         logNotice(
           "This canvas has fewer than two papers, so there are no edges to resolve."
@@ -1454,7 +1404,7 @@ export default class CitationGraphPlugin extends Plugin {
         return;
       }
 
-      const existingPapers = this.canvasPapers(canvasData);
+      const existingPapers = this.papersOnNodes(canvasData.nodes);
       if (existingPapers.length === 0) {
         logNotice(
           "The notes behind this canvas have no frontmatter, so there is nothing to describe to the model."
@@ -2940,7 +2890,16 @@ export default class CitationGraphPlugin extends Plugin {
           "and no default download path configured. Skipping those."
         );
       } else {
-        const choice = await new BatchMissingPdfModal(this.app, missingPdf).pick();
+        const choice = await askChoice<"download" | "skip" | null>(this.app, {
+          title: "PDFs not found",
+          question: `${missingPdf.length} paper${missingPdf.length > 1 ? "s do" : " does"} not have a downloaded PDF:`,
+          items: missingPdf.map((p) => p.title),
+          choices: [
+            { text: "Download all", value: "download", cta: true },
+            { text: "Skip these", value: "skip" },
+          ],
+          cancelled: null,
+        });
         if (choice === null) return;
 
         if (choice === "download") {
@@ -3014,7 +2973,14 @@ export default class CitationGraphPlugin extends Plugin {
     }
 
     if (longPapers.length > 0) {
-      const proceed = await new BatchLongPaperWarningModal(this.app, longPapers).pick();
+      const proceed = await askChoice<boolean>(this.app, {
+        title: "Long paper warning",
+        question:
+          "The following papers are long and may take extra time and tokens to summarize:",
+        items: longPapers.map(({ title, pages }) => `${title} (~${pages} pages)`),
+        choices: [{ text: "Proceed with all", value: true, cta: true }],
+        cancelled: false,
+      });
       if (!proceed) return;
     }
 
@@ -3030,9 +2996,15 @@ export default class CitationGraphPlugin extends Plugin {
     }
 
     if (withSummaryCount > 0) {
-      const choice = await new BatchSummaryModeModal(
-        this.app, withSummaryCount, resolved.length
-      ).pick();
+      const choice = await askChoice<"append" | "replace" | null>(this.app, {
+        title: "Existing summaries found",
+        question: `${withSummaryCount} of ${resolved.length} selected paper${resolved.length > 1 ? "s" : ""} already have a Summary section. How should existing summaries be handled?`,
+        choices: [
+          { text: "Append (with separator)", value: "append", cta: true },
+          { text: "Replace", value: "replace", warning: true },
+        ],
+        cancelled: null,
+      });
       if (choice === null) return;
       batchSummaryMode = choice;
     }
@@ -3135,12 +3107,14 @@ function estimatePdfPages(pdfPath: string): number {
 
 // ─── DOI Input Modal ────────────────────────────────────────
 
-class DoiInputModal extends Modal {
-  private resolve: (doi: string | null) => void;
+class DoiInputModal extends PromiseModal<string | null> {
+  protected cancelledValue(): string | null {
+    return null;
+  }
 
-  constructor(app: import("obsidian").App, resolve: (doi: string | null) => void) {
-    super(app);
-    this.resolve = resolve;
+  /** Open the modal and resolve with the entered identifier, or null. */
+  askForIdentifier(): Promise<string | null> {
+    return this.openAndWait();
   }
 
   onOpen(): void {
@@ -3164,9 +3138,7 @@ class DoiInputModal extends Modal {
           logNotice("Please enter a DOI.");
           return;
         }
-        this.resolve(doi);
-        this.resolve = () => {};
-        this.close();
+        this.settle(doi);
       });
     new ButtonComponent(footer)
       .setButtonText("Cancel")
@@ -3177,20 +3149,11 @@ class DoiInputModal extends Modal {
       if (e.key === "Enter") {
         e.preventDefault();
         const doi = input.value.trim();
-        if (doi) {
-          this.resolve(doi);
-          this.resolve = () => {};
-          this.close();
-        }
+        if (doi) this.settle(doi);
       }
     });
 
     window.setTimeout(() => input.focus(), 50);
-  }
-
-  onClose(): void {
-    this.resolve(null);
-    this.contentEl.empty();
   }
 }
 

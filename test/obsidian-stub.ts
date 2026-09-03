@@ -46,9 +46,36 @@ export class Notice {
 	}
 }
 
-/** Constructed and extended by the modals, never driven, in these tests. */
+/**
+ * Enough of Obsidian's Modal to drive the open/close lifecycle: `close()`
+ * calls `onClose()` exactly as the app does, which is what the promise-settling
+ * behaviour in PromiseModal depends on. `contentEl` is a stub with the two
+ * methods that lifecycle touches; building the UI needs the real DOM helpers
+ * Obsidian adds to HTMLElement and is not exercised here.
+ */
 export class Modal {
+	opened = false;
+	contentEl = { empty: () => {}, addClass: () => {} };
+
 	constructor(public app: App) {}
+
+	onOpen(): void {}
+	onClose(): void {}
+
+	open(): void {
+		this.opened = true;
+		this.onOpen();
+	}
+
+	close(): void {
+		if (!this.opened) return;
+		this.opened = false;
+		this.onClose();
+	}
+
+	setTitle(_title: string): this {
+		return this;
+	}
 }
 
 export class ButtonComponent {

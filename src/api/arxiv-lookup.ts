@@ -31,7 +31,7 @@ export function arxivIdFromUrl(url: unknown): string | null {
 }
 
 /**
- * Whether two titles name the same paper.
+ * Whether two titles are the same title.
  *
  * Compared on letters and digits alone: arXiv, OpenAlex and Zotero disagree
  * about capitalisation, hyphenation and trailing punctuation for the same
@@ -39,7 +39,7 @@ export function arxivIdFromUrl(url: unknown): string | null {
  * title-only match is the weakest evidence this module accepts, so it has to
  * be the whole title, not a prefix.
  */
-export function titlesMatch(a: string, b: string): boolean {
+export function titlesIdentical(a: string, b: string): boolean {
   const normalize = (value: string): string =>
     value
       .toLowerCase()
@@ -83,7 +83,7 @@ export async function findArxivId(
   if (paper.title) {
     const candidates = await clients.arxiv.searchByTitle(paper.title);
     for (const candidate of candidates) {
-      if (!titlesMatch(candidate.title, paper.title)) continue;
+      if (!titlesIdentical(candidate.title, paper.title)) continue;
       const id = normalizeArxiv(candidate.externalIds?.ArXiv);
       if (id) return id;
     }
