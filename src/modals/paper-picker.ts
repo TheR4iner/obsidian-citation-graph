@@ -1,6 +1,6 @@
-import { Modal, ButtonComponent } from "obsidian";
-import type { App } from "obsidian";
+import { ButtonComponent } from "obsidian";
 import type { S2Paper } from "../types";
+import { PromiseModal } from "./promise-modal";
 
 /** One row in a paper picker. Subclasses widen this with their own fields. */
 export interface PaperChoice {
@@ -33,7 +33,9 @@ function abstractKey(paper: S2Paper): string {
  * Expand and Recommend commands both present the same interface deliberately,
  * so the behaviour lives here rather than being kept in step by hand.
  */
-export abstract class PaperPickerModal<C extends PaperChoice> extends Modal {
+export abstract class PaperPickerModal<C extends PaperChoice> extends PromiseModal<
+  PickerResult<C>
+> {
   protected choices: C[] = [];
   protected searchQuery = "";
   protected yearMin = "";
@@ -42,10 +44,10 @@ export abstract class PaperPickerModal<C extends PaperChoice> extends Modal {
   private expandedAbstracts = new Set<string>();
   private listEl: HTMLElement | null = null;
   private countEl: HTMLElement | null = null;
-  private resolvePromise: ((result: PickerResult<C>) => void) | null = null;
 
-  constructor(app: App) {
-    super(app);
+  /** Dismissing the picker adds nothing and bans nothing. */
+  protected cancelledValue(): PickerResult<C> {
+    return { selected: [], banned: [] };
   }
 
   /** Modal heading. */
@@ -151,11 +153,7 @@ export abstract class PaperPickerModal<C extends PaperChoice> extends Modal {
       return false;
     });
 
-    if (this.resolvePromise) {
-      this.resolvePromise({ selected, banned });
-      this.resolvePromise = null;
-    }
-    this.close();
+    this.settle({ selected, banned });
   }
 
   protected getFilteredChoices(): C[] {
@@ -281,21 +279,14 @@ export abstract class PaperPickerModal<C extends PaperChoice> extends Modal {
   }
 
   onClose(): void {
-    if (this.resolvePromise) {
-      this.resolvePromise({ selected: [], banned: [] });
-      this.resolvePromise = null;
-    }
+    super.onClose();
     this.expandedAbstracts.clear();
     this.countEl = null;
     this.listEl = null;
-    this.contentEl.empty();
   }
 
   /** Open the modal and resolve once the user commits or cancels. */
   protected pickChoices(): Promise<PickerResult<C>> {
-    return new Promise((resolve) => {
-      this.resolvePromise = resolve;
-      this.open();
-    });
+    return this.openAndWait();
   }
 }

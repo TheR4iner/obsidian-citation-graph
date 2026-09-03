@@ -1,7 +1,8 @@
-import { Modal, ButtonComponent } from "obsidian";
+import { ButtonComponent } from "obsidian";
 import type { App } from "obsidian";
 import type { Paper, CanvasNode } from "../types";
 import { resolvePaperNodeId } from "../canvas/layout";
+import { PromiseModal } from "./promise-modal";
 
 interface SendChoice {
   paper: Paper;
@@ -18,11 +19,10 @@ export interface SendPickerResult {
  * Modal for selecting papers to send (copy/move) to another canvas.
  * Multi-select checkbox list with Select All / Deselect All.
  */
-export class SendPickerModal extends Modal {
+export class SendPickerModal extends PromiseModal<SendPickerResult | null> {
   private choices: SendChoice[] = [];
   private listEl: HTMLElement | null = null;
   private countEl: HTMLElement | null = null;
-  private resolvePromise: ((result: SendPickerResult | null) => void) | null = null;
 
   constructor(
     app: App,
@@ -92,14 +92,10 @@ export class SendPickerModal extends Modal {
       .onClick(() => {
         const selected = this.choices.filter((c) => c.selected);
         if (selected.length === 0) return;
-        if (this.resolvePromise) {
-          this.resolvePromise({
-            papers: selected.map((c) => c.paper),
-            nodeIds: new Set(selected.map((c) => c.node.id)),
-          });
-          this.resolvePromise = null;
-        }
-        this.close();
+        this.settle({
+          papers: selected.map((c) => c.paper),
+          nodeIds: new Set(selected.map((c) => c.node.id)),
+        });
       });
     new ButtonComponent(footer)
       .setButtonText("Cancel")
@@ -148,18 +144,11 @@ export class SendPickerModal extends Modal {
     this.updateCount();
   }
 
-  onClose(): void {
-    if (this.resolvePromise) {
-      this.resolvePromise(null);
-      this.resolvePromise = null;
-    }
-    this.contentEl.empty();
+  protected cancelledValue(): SendPickerResult | null {
+    return null;
   }
 
   pickPapers(): Promise<SendPickerResult | null> {
-    return new Promise((resolve) => {
-      this.resolvePromise = resolve;
-      this.open();
-    });
+    return this.openAndWait();
   }
 }

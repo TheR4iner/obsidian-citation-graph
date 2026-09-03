@@ -1,4 +1,4 @@
-import { Modal, ButtonComponent } from "obsidian";
+import { ButtonComponent } from "obsidian";
 import { logNotice } from "../log";
 import type { App } from "obsidian";
 import type { Paper } from "../types";
@@ -7,6 +7,7 @@ import * as path from "path";
 import * as https from "https";
 import { getDownloadFallback } from "../api/fallback-source";
 import { fileInFolder, resolveFolder } from "../paper-files";
+import { PromiseModal } from "./promise-modal";
 // Matches arxiv IDs: new format "2301.01234" or old format "quant-ph/0601075"
 const ARXIV_PATTERN = /^\d{4}\.\d{4,5}(v\d+)?$|^[a-z-]+\/\d{7}(v\d+)?$/;
 
@@ -92,15 +93,13 @@ export interface DownloadPickerResult {
  * Shows checkboxes for each paper on the canvas, a "Select All" button,
  * and a download path input pre-filled with the last used path.
  */
-export class DownloadPickerModal extends Modal {
+export class DownloadPickerModal extends PromiseModal<DownloadPickerResult | null> {
   private choices: DownloadChoice[] = [];
   private listEl: HTMLElement | null = null;
   private countEl: HTMLElement | null = null;
   private downloadPath: string;
   /** Pending debounced rescan of the download folder; cleared on close. */
   private rescanTimer: number | null = null;
-
-  private resolvePromise: ((result: DownloadPickerResult | null) => void) | null = null;
 
   constructor(
     app: App,
@@ -242,11 +241,7 @@ export class DownloadPickerModal extends Modal {
           logNotice("No papers selected for download.");
           return;
         }
-        if (this.resolvePromise) {
-          this.resolvePromise({ downloadPath: this.downloadPath, papers: selected });
-          this.resolvePromise = null;
-        }
-        this.close();
+        this.settle({ downloadPath: this.downloadPath, papers: selected });
       });
     new ButtonComponent(footer)
       .setButtonText("Cancel")
@@ -321,23 +316,20 @@ export class DownloadPickerModal extends Modal {
     this.updateCount();
   }
 
+  protected cancelledValue(): DownloadPickerResult | null {
+    return null;
+  }
+
   onClose(): void {
     if (this.rescanTimer) {
       window.clearTimeout(this.rescanTimer);
       this.rescanTimer = null;
     }
-    if (this.resolvePromise) {
-      this.resolvePromise(null);
-      this.resolvePromise = null;
-    }
-    this.contentEl.empty();
+    super.onClose();
   }
 
   pickPapers(): Promise<DownloadPickerResult | null> {
-    return new Promise((resolve) => {
-      this.resolvePromise = resolve;
-      this.open();
-    });
+    return this.openAndWait();
   }
 }
 

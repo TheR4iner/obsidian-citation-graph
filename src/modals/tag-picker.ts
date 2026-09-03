@@ -1,7 +1,7 @@
-import { Modal, ButtonComponent, Notice, ToggleComponent } from "obsidian";
-import type { App } from "obsidian";
+import { ButtonComponent, Notice, ToggleComponent } from "obsidian";
 import type { ZoteroItem } from "../types";
 import { ZoteroClient } from "../api/zotero";
+import { PromiseModal } from "./promise-modal";
 
 export interface TagPickerResult {
   tags: string[];
@@ -16,7 +16,7 @@ interface TagInfo {
   itemKeys: Set<string>;
 }
 
-export class TagPickerModal extends Modal {
+export class TagPickerModal extends PromiseModal<TagPickerResult | null> {
   private allItems: ZoteroItem[] = [];
   private tagsByName = new Map<string, TagInfo>();
   private selectedTags = new Set<string>();
@@ -26,11 +26,9 @@ export class TagPickerModal extends Modal {
   private listEl: HTMLElement | null = null;
   private countEl: HTMLElement | null = null;
   private confirmBtn: ButtonComponent | null = null;
-  private resolvePromise: ((result: TagPickerResult | null) => void) | null = null;
-  private resolved = false;
 
-  constructor(app: App) {
-    super(app);
+  protected cancelledValue(): TagPickerResult | null {
+    return null;
   }
 
   async loadItems(): Promise<void> {
@@ -225,24 +223,7 @@ export class TagPickerModal extends Modal {
   private submit(): void {
     const items = this.getMatchingItems();
     if (items.length === 0) return;
-    if (this.resolvePromise && !this.resolved) {
-      this.resolved = true;
-      this.resolvePromise({
-        tags: Array.from(this.selectedTags),
-        items,
-      });
-    }
-    this.close();
-  }
-
-  onClose(): void {
-    window.setTimeout(() => {
-      if (this.resolvePromise && !this.resolved) {
-        this.resolved = true;
-        this.resolvePromise(null);
-      }
-    }, 100);
-    this.contentEl.empty();
+    this.settle({ tags: Array.from(this.selectedTags), items });
   }
 
   async pickTags(): Promise<TagPickerResult | null> {
@@ -251,10 +232,6 @@ export class TagPickerModal extends Modal {
       new Notice("No tags found in your Zotero library.");
       return null;
     }
-    return new Promise((resolve) => {
-      this.resolvePromise = resolve;
-      this.resolved = false;
-      this.open();
-    });
+    return this.openAndWait();
   }
 }

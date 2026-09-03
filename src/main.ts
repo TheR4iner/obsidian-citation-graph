@@ -57,6 +57,7 @@ import {
   BatchLongPaperWarningModal,
   BatchSummaryModeModal,
 } from "./modals/batch-summary-modals";
+import { PromiseModal } from "./modals/promise-modal";
 import type { BannedPaper } from "./types";
 import { LiteratureNoteManager, readFrontmatterArxiv } from "./notes/literature";
 import { hasSummarySection, insertSummaryText } from "./notes/summary-text";
@@ -1063,10 +1064,7 @@ export default class CitationGraphPlugin extends Plugin {
       }
 
       // 2. Prompt for DOI or arxiv ID
-      const rawInput = await new Promise<string | null>((resolve) => {
-        const modal = new DoiInputModal(this.app, resolve);
-        modal.open();
-      });
+      const rawInput = await new DoiInputModal(this.app).askForIdentifier();
       if (!rawInput) return;
 
       // 3. Parse input: DOI URL, arxiv DOI, arxiv ID, or plain DOI
@@ -3135,12 +3133,14 @@ function estimatePdfPages(pdfPath: string): number {
 
 // ─── DOI Input Modal ────────────────────────────────────────
 
-class DoiInputModal extends Modal {
-  private resolve: (doi: string | null) => void;
+class DoiInputModal extends PromiseModal<string | null> {
+  protected cancelledValue(): string | null {
+    return null;
+  }
 
-  constructor(app: import("obsidian").App, resolve: (doi: string | null) => void) {
-    super(app);
-    this.resolve = resolve;
+  /** Open the modal and resolve with the entered identifier, or null. */
+  askForIdentifier(): Promise<string | null> {
+    return this.openAndWait();
   }
 
   onOpen(): void {
@@ -3164,9 +3164,7 @@ class DoiInputModal extends Modal {
           logNotice("Please enter a DOI.");
           return;
         }
-        this.resolve(doi);
-        this.resolve = () => {};
-        this.close();
+        this.settle(doi);
       });
     new ButtonComponent(footer)
       .setButtonText("Cancel")
@@ -3177,21 +3175,13 @@ class DoiInputModal extends Modal {
       if (e.key === "Enter") {
         e.preventDefault();
         const doi = input.value.trim();
-        if (doi) {
-          this.resolve(doi);
-          this.resolve = () => {};
-          this.close();
-        }
+        if (doi) this.settle(doi);
       }
     });
 
     window.setTimeout(() => input.focus(), 50);
   }
 
-  onClose(): void {
-    this.resolve(null);
-    this.contentEl.empty();
-  }
 }
 
 // ─── Helpers ────────────────────────────────────────────────
