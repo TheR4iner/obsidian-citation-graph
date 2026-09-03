@@ -1,14 +1,14 @@
 import { requestUrl } from "obsidian";
 import type { S2Paper } from "../types";
 import { asNumber, asRecord, asRecordArray, asString, asStringArray, pick } from "./json";
+import { RateLimiter } from "./rate-limit";
 
 const BASE = "https://api.openalex.org";
 
 /** Rate-limited OpenAlex API client */
 export class OpenAlexClient {
-  private lastRequestTime = 0;
   /** 150ms between requests (safely under 10 req/s limit) */
-  private readonly minInterval = 150;
+  private readonly limiter = new RateLimiter(150);
 
   constructor(private email: string = "") {}
 
@@ -21,16 +21,6 @@ export class OpenAlexClient {
     if (this.email) params["mailto"] = this.email;
     const qs = new URLSearchParams(params).toString();
     return `${BASE}${path}${qs ? "?" + qs : ""}`;
-  }
-
-  private async rateLimitedRequest<T>(fn: () => Promise<T>): Promise<T> {
-    const now = Date.now();
-    const elapsed = now - this.lastRequestTime;
-    if (elapsed < this.minInterval) {
-      await sleep(this.minInterval - elapsed);
-    }
-    this.lastRequestTime = Date.now();
-    return fn();
   }
 
   /**
@@ -69,7 +59,7 @@ export class OpenAlexClient {
 
     // Use the cites filter: works whose referenced_works include this work
     const oaId = workId.replace("https://openalex.org/", "");
-    return this.rateLimitedRequest(async () => {
+    return this.limiter.run(async () => {
       try {
         const url = this.buildUrl("/works", {
           filter: `cites:${oaId}`,
@@ -95,7 +85,7 @@ export class OpenAlexClient {
    * preprint and the journal article as two unrelated records.
    */
   async getLocationUrlsForDoi(doi: string): Promise<string[]> {
-    return this.rateLimitedRequest(async () => {
+    return this.limiter.run(async () => {
       try {
         const url = this.buildUrl(`/works/https://doi.org/${encodeDoiPath(doi)}`, {
           select: "locations,best_oa_location",
@@ -121,7 +111,7 @@ export class OpenAlexClient {
   }
 
   private async fetchWork(doi: string): Promise<Record<string, unknown> | null> {
-    return this.rateLimitedRequest(async () => {
+    return this.limiter.run(async () => {
       try {
         const url = this.buildUrl(`/works/https://doi.org/${encodeDoiPath(doi)}`, {
           select: "id,doi,display_name,publication_year,authorships,cited_by_count,abstract_inverted_index,referenced_works",
@@ -148,7 +138,7 @@ export class OpenAlexClient {
       const bareIds = batch.map((id) => id.replace("https://openalex.org/", ""));
       const filterValue = bareIds.join("|");
 
-      const papers = await this.rateLimitedRequest(async () => {
+      const papers = await this.limiter.run(async () => {
         try {
           const url = this.buildUrl("/works", {
             filter: `openalex:${filterValue}`,
@@ -224,8 +214,4 @@ function reconstructAbstract(invertedIndex: unknown): string | null {
   }
   words.sort((a, b) => a[0] - b[0]);
   return words.map(([, word]) => word).join(" ") || null;
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => window.setTimeout(resolve, ms));
 }

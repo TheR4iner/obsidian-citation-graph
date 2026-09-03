@@ -1,30 +1,20 @@
 import { requestUrl } from "obsidian";
 import type { S2Paper } from "../types";
+import { RateLimiter } from "./rate-limit";
 
 const BASE = "https://export.arxiv.org/api/query";
 
 /** Rate-limited arXiv metadata client (Atom API) */
 export class ArxivMetadataClient {
-  private lastRequestTime = 0;
   /** arXiv asks for >=3s between requests to be polite */
-  private readonly minInterval = 3000;
-
-  private async rateLimitedRequest<T>(fn: () => Promise<T>): Promise<T> {
-    const now = Date.now();
-    const elapsed = now - this.lastRequestTime;
-    if (elapsed < this.minInterval) {
-      await sleep(this.minInterval - elapsed);
-    }
-    this.lastRequestTime = Date.now();
-    return fn();
-  }
+  private readonly limiter = new RateLimiter(3000);
 
   /**
    * Look up an arXiv ID (e.g. "1706.03762" or "1706.03762v5") and return
    * S2Paper-shaped metadata. Returns null if the ID isn't found.
    */
   async getMetadata(arxivId: string): Promise<S2Paper | null> {
-    return this.rateLimitedRequest(async () => {
+    return this.limiter.run(async () => {
       try {
         const url = `${BASE}?id_list=${encodeURIComponent(arxivId)}`;
         const response = await requestUrl({ url });
@@ -58,7 +48,7 @@ export class ArxivMetadataClient {
       .join(" ");
     if (!phrase) return [];
 
-    return this.rateLimitedRequest(async () => {
+    return this.limiter.run(async () => {
       try {
         const params = new URLSearchParams({
           search_query: `ti:"${phrase}"`,
@@ -145,8 +135,4 @@ function parseArxivEntry(entry: Element, requestedId: string): S2Paper | null {
     abstract: summary || null,
     citationCount: null,
   };
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
