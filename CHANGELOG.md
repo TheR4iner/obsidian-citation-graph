@@ -6,6 +6,12 @@ Each released version here is also the body of the matching [GitHub release](htt
 
 ## [Unreleased]
 
+### Changed
+
+- The Claude CLI is now given only the environment it needs. A program started by another normally inherits every variable in it, which meant handing the CLI every key you had exported: your Zotero key, your OpenAI key, anything else in the shell Obsidian was launched from. It now receives `PATH`, `HOME`, the temporary directory and its own `ANTHROPIC_*` and `CLAUDE_*` settings, and nothing else. It is still launched without a shell, so nothing in a prompt or a paper title can become a command, and the path you configure now has to be an absolute path to a file that exists, or the bare name `claude`, rather than being passed through as typed.
+- Every path the plugin touches outside your vault is now built and checked in one place, and has to resolve inside a folder you named. A filename that would escape its folder is refused before anything is opened. Paper titles, author names and arXiv IDs all arrive from remote services and end up in filenames, so this is checked rather than assumed.
+- The README now says what all of the above means for you, alongside the existing note on which services are contacted.
+
 ## [0.5.0] - 2026-09-01
 
 ### Fixed

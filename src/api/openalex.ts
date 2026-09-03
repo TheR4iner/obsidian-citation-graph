@@ -1,5 +1,6 @@
 import { requestUrl } from "obsidian";
 import type { S2Paper } from "../types";
+import { asNumber, asRecord, asRecordArray, asString, asStringArray, pick } from "./json";
 
 const BASE = "https://api.openalex.org";
 
@@ -39,10 +40,11 @@ export class OpenAlexClient {
   async getReferencesForDoi(doi: string): Promise<S2Paper[]> {
     // Step 1: look up the work to get its referenced_works list
     const work = await this.fetchWork(doi);
-    if (!work || !work.referenced_works?.length) return [];
+    const referenced = asStringArray(work?.referenced_works);
+    if (referenced.length === 0) return [];
 
     // Step 2: fetch metadata for referenced works in batches
-    return this.resolveOpenAlexIds(work.referenced_works);
+    return this.resolveOpenAlexIds(referenced);
   }
 
   /**
@@ -62,10 +64,11 @@ export class OpenAlexClient {
    */
   async getCitationsForDoi(doi: string): Promise<S2Paper[]> {
     const work = await this.fetchWork(doi);
-    if (!work?.id) return [];
+    const workId = asString(work?.id);
+    if (!workId) return [];
 
     // Use the cites filter: works whose referenced_works include this work
-    const oaId = work.id.replace("https://openalex.org/", "");
+    const oaId = workId.replace("https://openalex.org/", "");
     return this.rateLimitedRequest(async () => {
       try {
         const url = this.buildUrl("/works", {
@@ -74,8 +77,9 @@ export class OpenAlexClient {
           select: "id,doi,display_name,publication_year,authorships,cited_by_count,abstract_inverted_index",
         });
         const response = await requestUrl({ url });
-        const results = response.json?.results || [];
-        return results.map(mapOpenAlexToS2Paper).filter((p: S2Paper) => p.paperId);
+        return asRecordArray(pick(response.json, "results"))
+          .map(mapOpenAlexToS2Paper)
+          .filter((paper) => paper.paperId !== "");
       } catch {
         return [];
       }
@@ -97,16 +101,16 @@ export class OpenAlexClient {
           select: "locations,best_oa_location",
         });
         const response = await requestUrl({ url });
-        const work = response.json;
+        const work: unknown = response.json;
         const locations = [
-          ...(Array.isArray(work?.locations) ? work.locations : []),
-          work?.best_oa_location,
+          ...asRecordArray(pick(work, "locations")),
+          ...asRecordArray([pick(work, "best_oa_location")]),
         ];
         const urls: string[] = [];
         for (const location of locations) {
           for (const key of ["landing_page_url", "pdf_url"]) {
-            const value = location?.[key];
-            if (typeof value === "string" && value) urls.push(value);
+            const value = asString(location[key]);
+            if (value) urls.push(value);
           }
         }
         return urls;
@@ -116,14 +120,14 @@ export class OpenAlexClient {
     });
   }
 
-  private async fetchWork(doi: string): Promise<any | null> {
+  private async fetchWork(doi: string): Promise<Record<string, unknown> | null> {
     return this.rateLimitedRequest(async () => {
       try {
         const url = this.buildUrl(`/works/https://doi.org/${encodeDoiPath(doi)}`, {
           select: "id,doi,display_name,publication_year,authorships,cited_by_count,abstract_inverted_index,referenced_works",
         });
         const response = await requestUrl({ url });
-        return response.json;
+        return asRecord(response.json);
       } catch {
         return null;
       }
@@ -152,7 +156,7 @@ export class OpenAlexClient {
             select: "id,doi,display_name,publication_year,authorships,cited_by_count,abstract_inverted_index",
           });
           const response = await requestUrl({ url });
-          return response.json?.results || [];
+          return asRecordArray(pick(response.json, "results"));
         } catch {
           return [];
         }
@@ -186,24 +190,20 @@ function encodeDoiPath(doi: string): string {
 }
 
 /** Convert an OpenAlex work object to S2Paper format */
-function mapOpenAlexToS2Paper(work: any): S2Paper {
-  const doi = work.doi
-    ? work.doi.replace("https://doi.org/", "")
-    : null;
-  const oaId = work.id
-    ? work.id.replace("https://openalex.org/", "")
-    : null;
+function mapOpenAlexToS2Paper(work: Record<string, unknown>): S2Paper {
+  const doi = asString(work.doi)?.replace("https://doi.org/", "") ?? null;
+  const oaId = asString(work.id)?.replace("https://openalex.org/", "") ?? null;
 
   return {
     paperId: doi ? `doi:${doi.toLowerCase()}` : oaId ? `openalex:${oaId}` : "",
     externalIds: doi ? { DOI: doi } : null,
-    title: work.display_name || "",
-    year: work.publication_year || null,
-    authors: (work.authorships || []).map((a: any) => ({
-      name: a.author?.display_name || "",
+    title: asString(work.display_name) ?? "",
+    year: asNumber(work.publication_year),
+    authors: asRecordArray(work.authorships).map((authorship) => ({
+      name: asString(pick(authorship, "author", "display_name")) ?? "",
     })),
     abstract: reconstructAbstract(work.abstract_inverted_index),
-    citationCount: work.cited_by_count ?? null,
+    citationCount: asNumber(work.cited_by_count),
   };
 }
 
@@ -211,18 +211,19 @@ function mapOpenAlexToS2Paper(work: any): S2Paper {
  * OpenAlex stores abstracts as inverted indexes: { "word": [pos1, pos2], ... }
  * Reconstruct into plain text.
  */
-function reconstructAbstract(
-  invertedIndex: Record<string, number[]> | null | undefined
-): string | null {
-  if (!invertedIndex) return null;
+function reconstructAbstract(invertedIndex: unknown): string | null {
+  const index = asRecord(invertedIndex);
+  if (!index) return null;
   const words: [number, string][] = [];
-  for (const [word, positions] of Object.entries(invertedIndex)) {
-    for (const pos of positions) {
-      words.push([pos, word]);
+  for (const [word, positions] of Object.entries(index)) {
+    if (!Array.isArray(positions)) continue;
+    for (const position of positions) {
+      const at = asNumber(position);
+      if (at !== null) words.push([at, word]);
     }
   }
   words.sort((a, b) => a[0] - b[0]);
-  return words.map((w) => w[1]).join(" ") || null;
+  return words.map(([, word]) => word).join(" ") || null;
 }
 
 function sleep(ms: number): Promise<void> {

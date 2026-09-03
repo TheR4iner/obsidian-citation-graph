@@ -1,5 +1,6 @@
 import { requestUrl, Notice } from "obsidian";
 import type { S2Paper } from "../types";
+import { asString, pick } from "./json";
 
 const BASE = "https://api.semanticscholar.org/graph/v1";
 
@@ -122,8 +123,8 @@ export class SemanticScholarClient {
           url,
           headers: this.getHeaders(),
         });
-        const data = response.json;
-        if (!data?.paperId) return null;
+        const data: unknown = response.json;
+        if (!asString(pick(data, "paperId"))) return null;
         return data as S2Paper;
       } catch (e) {
         // Hand a rate limit back to the retry layer; anything else is this
@@ -255,8 +256,8 @@ export class SemanticScholarClient {
         const url =
           `${BASE}/paper/search/match?query=${encodeURIComponent(query)}&fields=${fields}`;
         const response = await requestUrl({ url, headers: this.getHeaders() });
-        const match = response.json?.data?.[0];
-        if (!match?.paperId) return null;
+        const match = pick(response.json, "data", "0");
+        if (!asString(pick(match, "paperId"))) return null;
         return match as S2Paper;
       } catch (e) {
         if (statusOf(e) === 429) throw e;
@@ -302,8 +303,8 @@ export class SemanticScholarClient {
           url: `${BASE}/paper/${encodeURIComponent(externalId)}?fields=${fields}`,
           headers: this.getHeaders(),
         });
-        const data = response.json;
-        if (!data?.paperId) return null;
+        const data: unknown = response.json;
+        if (!asString(pick(data, "paperId"))) return null;
         return data as S2Paper;
       } catch (e) {
         if (statusOf(e) === 429) throw e;

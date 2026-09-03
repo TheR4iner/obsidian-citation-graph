@@ -1,28 +1,16 @@
-import { Modal, ButtonComponent, Notice } from "obsidian";
+import { Modal, ButtonComponent } from "obsidian";
 import { logNotice } from "../log";
 import type { App } from "obsidian";
 import type { Paper } from "../types";
 import * as fs from "fs";
-import * as os from "os";
 import * as path from "path";
 import * as https from "https";
 import { getDownloadFallback } from "../api/fallback-source";
+import { fileInFolder, resolveFolder } from "../paper-files";
 // Matches arxiv IDs: new format "2301.01234" or old format "quant-ph/0601075"
 const ARXIV_PATTERN = /^\d{4}\.\d{4,5}(v\d+)?$|^[a-z-]+\/\d{7}(v\d+)?$/;
 
-/**
- * Expand a leading "~" to the user's home directory. Node's fs/path never do
- * this (it is a shell convention), so an unexpanded "~/papers" would otherwise
- * create a literal "~" folder in the cwd. Bare "~" and "~/..." are handled;
- * "~user" syntax is not (we have no way to resolve other users' homes here).
- */
-export function expandTilde(p: string): string {
-  if (p === "~") return os.homedir();
-  if (p.startsWith("~/") || p.startsWith("~\\")) {
-    return path.join(os.homedir(), p.slice(2));
-  }
-  return p;
-}
+export { expandTilde } from "../paper-files";
 
 function isValidArxivId(id: string): boolean {
   return ARXIV_PATTERN.test(id);
@@ -131,7 +119,7 @@ export class DownloadPickerModal extends Modal {
    */
   private checkAlreadyDownloaded(): void {
     let existingFiles: string[] = [];
-    const resolvedPath = this.downloadPath ? expandTilde(this.downloadPath) : "";
+    const resolvedPath = this.downloadPath ? resolveFolder(this.downloadPath) : "";
     if (resolvedPath && fs.existsSync(resolvedPath)) {
       try {
         existingFiles = fs.readdirSync(resolvedPath).map((f) => f.toLowerCase());
@@ -387,8 +375,10 @@ export async function downloadPapers(
 ): Promise<DownloadOutcome> {
   const { onProgress, resolveArxiv } = opts;
   const resolvedArxiv = new Map<string, string>();
-  // Resolve a leading "~" before any filesystem use; fs/path don't do this.
-  downloadPath = expandTilde(downloadPath);
+  // Resolved to an absolute path before any filesystem use: everything below
+  // is checked against this folder, and a relative one would be checked
+  // against Obsidian's working directory instead of the user's.
+  downloadPath = resolveFolder(downloadPath);
   // Validate the download folder up-front: a bad path would otherwise fail
   // every paper one-by-one with the same opaque error.
   try {
@@ -493,19 +483,13 @@ export async function downloadPapers(
         throw new Error(`Not available on arXiv or ${fallback.name}.` + arxivSuffix);
       }
 
-      // Rename to formatted filename. sanitizeFilename already strips path
-      // separators, but the title is remote-sourced, so assert containment
-      // before moving anything rather than trusting that to stay true.
+      // Rename to the formatted filename. sanitizeFilename already strips
+      // path separators, but the title is remote-sourced, so fileInFolder
+      // asserts containment rather than trusting that to stay true.
       if (fs.existsSync(savedPath)) {
-        const dir = path.resolve(path.dirname(savedPath));
-        const newPath = path.join(dir, buildPaperFilename(paper, savedPath));
-        if (!newPath.startsWith(dir + path.sep)) {
-          console.warn(
-            `Citation Graph: refusing to rename "${savedPath}" outside ${dir}`
-          );
-        } else if (path.resolve(savedPath) !== newPath) {
-          fs.renameSync(savedPath, newPath);
-        }
+        const dir = path.dirname(savedPath);
+        const newPath = fileInFolder(dir, buildPaperFilename(paper, savedPath));
+        if (path.resolve(savedPath) !== newPath) fs.renameSync(savedPath, newPath);
       }
       downloaded++;
     } catch (e) {
@@ -550,10 +534,11 @@ function downloadFromArxiv(arxivId: string, outputDir: string): Promise<string> 
   // resolved destination stays inside it.
   const safeId = arxivId.replace(/[^A-Za-z0-9_.-]/g, "_");
   const url = `https://arxiv.org/pdf/${arxivId}`;
-  const outputDirResolved = path.resolve(outputDir);
-  const destPath = path.join(outputDirResolved, `${safeId}.pdf`);
-  if (!destPath.startsWith(outputDirResolved + path.sep)) {
-    return Promise.reject(new Error(`Refusing to write outside ${outputDir}`));
+  let destPath: string;
+  try {
+    destPath = fileInFolder(outputDir, `${safeId}.pdf`);
+  } catch (e) {
+    return Promise.reject(e instanceof Error ? e : new Error(String(e)));
   }
 
   return new Promise((resolve, reject) => {

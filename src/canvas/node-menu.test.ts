@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import type { Menu, Plugin } from "obsidian";
+import type { Plugin } from "obsidian";
 import {
 	canvasNodePath,
 	canvasSelectionPaths,
@@ -100,7 +100,7 @@ describe("registerCanvasPaperMenu", () => {
 		registerCanvasPaperMenu(plugin, () => true, actions(run));
 
 		const { menu, items } = fakeMenu();
-		handlers.get("canvas:node-menu")!(menu as unknown as Menu, { filePath: "Papers/One.md" });
+		handlers.get("canvas:node-menu")!(menu, { filePath: "Papers/One.md" });
 
 		expect(items.map((i) => i.title)).toEqual(["Expand", "Delete paper"]);
 		items[1].click();
@@ -113,7 +113,7 @@ describe("registerCanvasPaperMenu", () => {
 		registerCanvasPaperMenu(plugin, () => false, actions(vi.fn()));
 
 		const { menu, items, separatorCount } = fakeMenu();
-		handlers.get("canvas:node-menu")!(menu as unknown as Menu, { filePath: "Ideas/Todo.md" });
+		handlers.get("canvas:node-menu")!(menu, { filePath: "Ideas/Todo.md" });
 
 		expect(items).toEqual([]);
 		expect(separatorCount()).toBe(0);
@@ -129,7 +129,7 @@ describe("registerCanvasPaperMenu", () => {
 			{ filePath: "Papers/One.md" },
 			{ filePath: "Papers/Two.md" },
 		]);
-		handlers.get("canvas:selection-menu")!(menu as unknown as Menu, { selection });
+		handlers.get("canvas:selection-menu")!(menu, { selection });
 
 		expect(items.map((i) => i.title)).toEqual(["Delete 2 papers"]);
 		items[0].click();
