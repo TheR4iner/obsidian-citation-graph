@@ -9,6 +9,15 @@ export default defineConfig([
   },
   ...obsidianmd.configs.recommended,
   {
+    // The test shims stand in for browser and Obsidian globals that do not
+    // exist under node, which is exactly what these two rules forbid.
+    files: ["test/**"],
+    rules: {
+      "obsidianmd/no-global-this": "off",
+      "obsidianmd/prefer-window-timers": "off",
+    },
+  },
+  {
     languageOptions: {
       parserOptions: {
         projectService: {
