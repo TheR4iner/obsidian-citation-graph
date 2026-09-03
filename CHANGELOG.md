@@ -6,11 +6,20 @@ Each released version here is also the body of the matching [GitHub release](htt
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-09-03
+
 ### Changed
 
 - The Claude CLI is now given only the environment it needs. A program started by another normally inherits every variable in it, which meant handing the CLI every key you had exported: your Zotero key, your OpenAI key, anything else in the shell Obsidian was launched from. It now receives `PATH`, `HOME`, the temporary directory and its own `ANTHROPIC_*` and `CLAUDE_*` settings, and nothing else. It is still launched without a shell, so nothing in a prompt or a paper title can become a command, and the path you configure now has to be an absolute path to a file that exists, or the bare name `claude`, rather than being passed through as typed.
 - Every path the plugin touches outside your vault is now built and checked in one place, and has to resolve inside a folder you named. A filename that would escape its folder is refused before anything is opened. Paper titles, author names and arXiv IDs all arrive from remote services and end up in filenames, so this is checked rather than assumed.
 - The README now says what all of the above means for you, alongside the existing note on which services are contacted.
+
+### Fixed
+
+- Expanding a paper no longer trips OpenAlex's, CrossRef's or arXiv's rate limits. Each of those has a minimum gap the plugin is supposed to leave between requests, and the spacing collapsed whenever two requests were started together: both measured the gap from the same moment, waited the same time, and then fired at the same instant. Expanding any paper that has a DOI does exactly that, asking OpenAlex for its references and the works citing it at once, so the gap was never actually left. Requests are now queued one behind the next.
+- A malformed reply from OpenAlex, CrossRef, Zotero or a language model now costs the field it was carrying rather than the whole command. A value of an unexpected type reads as missing, so an expansion or a summary finishes with one field blank instead of stopping partway with an unhelpful error.
+- A paper whose CrossRef record dates it only by its print or online publication date now shows that year, rather than no year at all.
+- The download window's *Download to* box now fills the width of the dialog, so a long path is readable without scrolling inside a narrow field.
 
 ## [0.5.0] - 2026-09-01
 
@@ -112,7 +121,8 @@ First public release.
 - **Sync canvas to Zotero**, **Send papers to canvas**, **Relayout canvas**, **Delete paper**, and **Clear Semantic Scholar cache**.
 - Settings for the collections folder, the Zotero and Semantic Scholar API keys, node size, the five status colours, and the full LLM configuration.
 
-[Unreleased]: https://github.com/TheR4iner/obsidian-citation-graph/compare/0.5.0...HEAD
+[Unreleased]: https://github.com/TheR4iner/obsidian-citation-graph/compare/0.6.0...HEAD
+[0.6.0]: https://github.com/TheR4iner/obsidian-citation-graph/compare/0.5.0...0.6.0
 [0.5.0]: https://github.com/TheR4iner/obsidian-citation-graph/compare/0.4.0...0.5.0
 [0.4.0]: https://github.com/TheR4iner/obsidian-citation-graph/compare/0.3.0...0.4.0
 [0.3.0]: https://github.com/TheR4iner/obsidian-citation-graph/compare/0.2.1...0.3.0
