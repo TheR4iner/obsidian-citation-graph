@@ -1,6 +1,7 @@
 import { App, TFile, normalizePath } from "obsidian";
 import type { Paper, PaperStatus, DisplayStatus } from "../types";
 import { parsePaperStatus } from "../types";
+import { truncateToBytes } from "../paper-files";
 
 /**
  * Byte budget for a note's filename, leaving room for the ".md" suffix and the
@@ -8,20 +9,6 @@ import { parsePaperStatus } from "../types";
  * and NTFS.
  */
 const MAX_NOTE_NAME_BYTES = 200;
-
-/** Truncate to at most `maxBytes` of UTF-8 without splitting a code point. */
-function truncateToBytes(value: string, maxBytes: number): string {
-  if (Buffer.byteLength(value, "utf8") <= maxBytes) return value;
-  let out = "";
-  let used = 0;
-  for (const ch of value) {
-    const size = Buffer.byteLength(ch, "utf8");
-    if (used + size > maxBytes) break;
-    out += ch;
-    used += size;
-  }
-  return out;
-}
 
 /**
  * Percent-encode the characters that are structurally significant inside a

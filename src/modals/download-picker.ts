@@ -6,12 +6,10 @@ import * as fs from "fs";
 import * as path from "path";
 import * as https from "https";
 import { getDownloadFallback } from "../api/fallback-source";
-import { fileInFolder, resolveFolder } from "../paper-files";
+import { fileInFolder, resolveFolder, truncateToBytes } from "../paper-files";
 import { PromiseModal } from "./promise-modal";
 // Matches arxiv IDs: new format "2301.01234" or old format "quant-ph/0601075"
 const ARXIV_PATTERN = /^\d{4}\.\d{4,5}(v\d+)?$|^[a-z-]+\/\d{7}(v\d+)?$/;
-
-export { expandTilde } from "../paper-files";
 
 function isValidArxivId(id: string): boolean {
   return ARXIV_PATTERN.test(id);
@@ -35,20 +33,6 @@ export function sanitizeFilename(name: string): string {
  * ENAMETOOLONG surfaces as an opaque per-paper download failure.
  */
 const MAX_FILENAME_BYTES = 200;
-
-/** Truncate to at most `maxBytes` of UTF-8 without splitting a code point. */
-function truncateToBytes(value: string, maxBytes: number): string {
-  if (Buffer.byteLength(value, "utf8") <= maxBytes) return value;
-  let out = "";
-  let used = 0;
-  for (const ch of value) {
-    const size = Buffer.byteLength(ch, "utf8");
-    if (used + size > maxBytes) break;
-    out += ch;
-    used += size;
-  }
-  return out.trimEnd();
-}
 
 /** Build a formatted filename: "Title (FirstAuthor) (Year).ext" */
 export function buildPaperFilename(paper: Paper, originalPath: string): string {

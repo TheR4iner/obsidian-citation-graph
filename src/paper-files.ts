@@ -18,6 +18,27 @@ import * as path from "path";
  */
 
 /**
+ * Truncate to at most `maxBytes` of UTF-8 without splitting a code point.
+ *
+ * Names built from paper titles routinely exceed the 255-byte limit that ext4,
+ * APFS and NTFS enforce on a single name, and the resulting ENAMETOOLONG
+ * surfaces as an opaque per-file failure. Callers clean the result again
+ * afterwards: cutting mid-string can expose a new trailing dot or space.
+ */
+export function truncateToBytes(value: string, maxBytes: number): string {
+  if (Buffer.byteLength(value, "utf8") <= maxBytes) return value;
+  let out = "";
+  let used = 0;
+  for (const ch of value) {
+    const size = Buffer.byteLength(ch, "utf8");
+    if (used + size > maxBytes) break;
+    out += ch;
+    used += size;
+  }
+  return out.trimEnd();
+}
+
+/**
  * Expand a leading "~" to the user's home directory. Node's fs/path never do
  * this (it is a shell convention), so an unexpanded "~/papers" would otherwise
  * create a literal "~" folder in the working directory. Bare "~" and "~/..."

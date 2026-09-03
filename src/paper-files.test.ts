@@ -7,6 +7,7 @@ import {
 	fileInFolder,
 	isInside,
 	resolveFolder,
+	truncateToBytes,
 } from "./paper-files";
 
 const home = os.homedir();
@@ -115,5 +116,29 @@ describe("assertInsideFolders", () => {
 	it("expands a tilde in the allowed folder", () => {
 		const target = path.join(home, "papers", "a.pdf");
 		expect(assertInsideFolders(target, ["~/papers"])).toBe(target);
+	});
+});
+
+describe("truncateToBytes", () => {
+	it("leaves a name that already fits", () => {
+		expect(truncateToBytes("short.pdf", 200)).toBe("short.pdf");
+	});
+
+	it("cuts to the byte budget, not the character count", () => {
+		// Each "é" is two UTF-8 bytes, so five of them fill a 10-byte budget.
+		const cut = truncateToBytes("é".repeat(20), 10);
+		expect(cut).toBe("é".repeat(5));
+		expect(Buffer.byteLength(cut, "utf8")).toBe(10);
+	});
+
+	it("never splits a multi-byte code point", () => {
+		// A 4-byte emoji cannot fit in the last 3 bytes of an 11-byte budget.
+		const cut = truncateToBytes("ab" + "\u{1F600}".repeat(3), 11);
+		expect(Buffer.byteLength(cut, "utf8")).toBeLessThanOrEqual(11);
+		expect(cut).toBe("ab" + "\u{1F600}".repeat(2));
+	});
+
+	it("drops the trailing space a cut can leave behind", () => {
+		expect(truncateToBytes("abcd efgh", 5)).toBe("abcd");
 	});
 });
