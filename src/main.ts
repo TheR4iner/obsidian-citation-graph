@@ -221,121 +221,82 @@ export default class CitationGraphPlugin extends Plugin {
     this.arxivClient = new ArxivMetadataClient();
     this.applyApiCredentials();
 
-    this.addCommand({
-      id: "create-from-collection",
-      name: "Canvas: create from collection",
-      callback: () => this.createFromCollection(),
-    });
-
-    this.addCommand({
-      id: "create-from-tag",
-      name: "Canvas: create from tag",
-      callback: () => this.createFromTag(),
-    });
-
-    this.addCommand({
-      id: "expand-paper",
-      name: "Papers: expand paper",
-      checkCallback: this.canvasCommand(() => this.expandPaper()),
-    });
-
-    this.addCommand({
-      id: "expand-paper-refresh",
-      name: "Papers: expand paper (force refresh)",
-      checkCallback: this.canvasCommand(() => this.expandPaper({ forceRefresh: true })),
-    });
-
-    this.addCommand({
-      id: "clear-s2-cache",
-      name: "Maintenance: clear Semantic Scholar cache",
-      callback: async () => {
-        this.s2Cache.clear();
-        await this.s2Cache.save();
-        new Notice("Semantic Scholar cache cleared.");
-      },
-    });
-
-    this.addCommand({
-      id: "relayout-canvas",
-      name: "Canvas: relayout",
-      checkCallback: this.canvasCommand(() => this.relayoutCanvas()),
-    });
-
-    this.addCommand({
-      id: "resolve-missing-edges",
-      name: "Canvas: resolve missing citation edges",
-      checkCallback: this.canvasCommand(() => this.resolveMissingEdges()),
-    });
-
-    this.addCommand({
-      id: "resolve-missing-edges-refresh",
-      name: "Canvas: resolve missing citation edges (force refresh)",
-      checkCallback: this.canvasCommand(() =>
-        this.resolveMissingEdges({ forceRefresh: true })
-      ),
-    });
-
-    this.addCommand({
-      id: "sync-to-zotero",
-      name: "Canvas: sync to Zotero",
-      checkCallback: this.canvasCommand(() => this.syncToZotero()),
-    });
-
-    this.addCommand({
-      id: "download-papers",
-      name: "PDFs: download",
-      checkCallback: this.canvasCommand(() => this.downloadPapersFromCanvas()),
-    });
-
-    this.addCommand({
-      id: "add-paper-by-doi",
-      name: "Papers: add by DOI or arXiv",
-      checkCallback: this.canvasCommand(() => this.addPaperByDoi()),
-    });
-
-    this.addCommand({
-      id: "refresh-reading-status",
-      name: "Reading: refresh reading status",
-      checkCallback: this.canvasCommand(() => this.refreshReadingStatus()),
-    });
-
-    this.addCommand({
-      id: "set-paper-status",
-      name: "Reading: set paper status",
-      checkCallback: this.canvasCommand(() => this.setPaperStatus()),
-    });
-
-    this.addCommand({
-      id: "toggle-read-status",
-      name: "Reading: cycle reading status",
-      checkCallback: this.canvasCommand(() => this.cycleReadingStatus()),
-    });
-
-    this.addCommand({
-      id: "send-papers-to-canvas",
-      name: "Canvas: send papers to another canvas",
-      checkCallback: this.canvasCommand(() => this.sendPapersToCanvas()),
-    });
-
-    this.addCommand({
-      id: "write-summary",
-      name: "PDFs: write summary",
-      checkCallback: this.canvasCommand(() => this.writeSummary()),
-    });
-
-    this.addCommand({
-      id: "recommend-papers",
-      name: "Papers: recommend papers",
-      checkCallback: this.canvasCommand(() => this.recommendPapers()),
-    });
-
-    this.addCommand({
-      id: "delete-paper",
-      name: "Papers: delete paper",
-      checkCallback: this.canvasCommand(() => this.deletePaper()),
-    });
-
+    this.registerCommands();
     this.registerPaperContextMenu();
+  }
+
+  /**
+   * Register every command in the palette.
+   *
+   * Two tables rather than eighteen near-identical blocks: the first holds the
+   * commands that need a canvas open and so go through `canvasCommand`, the
+   * second the ones that work anywhere. Adding a command means adding a row,
+   * which is also what stops a new one from quietly missing the canvas guard.
+   */
+  private registerCommands(): void {
+    const canvasCommands: Array<[id: string, name: string, run: () => unknown]> = [
+      ["expand-paper", "Papers: expand paper", () => this.expandPaper()],
+      [
+        "expand-paper-refresh",
+        "Papers: expand paper (force refresh)",
+        () => this.expandPaper({ forceRefresh: true }),
+      ],
+      ["relayout-canvas", "Canvas: relayout", () => this.relayoutCanvas()],
+      [
+        "resolve-missing-edges",
+        "Canvas: resolve missing citation edges",
+        () => this.resolveMissingEdges(),
+      ],
+      [
+        "resolve-missing-edges-refresh",
+        "Canvas: resolve missing citation edges (force refresh)",
+        () => this.resolveMissingEdges({ forceRefresh: true }),
+      ],
+      ["sync-to-zotero", "Canvas: sync to Zotero", () => this.syncToZotero()],
+      ["download-papers", "PDFs: download", () => this.downloadPapersFromCanvas()],
+      ["add-paper-by-doi", "Papers: add by DOI or arXiv", () => this.addPaperByDoi()],
+      [
+        "refresh-reading-status",
+        "Reading: refresh reading status",
+        () => this.refreshReadingStatus(),
+      ],
+      ["set-paper-status", "Reading: set paper status", () => this.setPaperStatus()],
+      ["toggle-read-status", "Reading: cycle reading status", () => this.cycleReadingStatus()],
+      [
+        "send-papers-to-canvas",
+        "Canvas: send papers to another canvas",
+        () => this.sendPapersToCanvas(),
+      ],
+      ["write-summary", "PDFs: write summary", () => this.writeSummary()],
+      ["recommend-papers", "Papers: recommend papers", () => this.recommendPapers()],
+      ["delete-paper", "Papers: delete paper", () => this.deletePaper()],
+    ];
+
+    for (const [id, name, run] of canvasCommands) {
+      this.addCommand({ id, name, checkCallback: this.canvasCommand(run) });
+    }
+
+    const anywhereCommands: Array<[id: string, name: string, run: () => unknown]> = [
+      [
+        "create-from-collection",
+        "Canvas: create from collection",
+        () => this.createFromCollection(),
+      ],
+      ["create-from-tag", "Canvas: create from tag", () => this.createFromTag()],
+      [
+        "clear-s2-cache",
+        "Maintenance: clear Semantic Scholar cache",
+        async () => {
+          this.s2Cache.clear();
+          await this.s2Cache.save();
+          new Notice("Semantic Scholar cache cleared.");
+        },
+      ],
+    ];
+
+    for (const [id, name, callback] of anywhereCommands) {
+      this.addCommand({ id, name, callback });
+    }
   }
 
   /**
