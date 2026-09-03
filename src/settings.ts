@@ -45,6 +45,23 @@ const STATUS_COLOR_SETTINGS: Array<{
 ];
 import { defaultModelForProvider } from "./api/llm";
 
+/**
+ * Settings whose value is a plain string, excluding the ones typed as a narrow
+ * union (the status colours, the provider name). Those carry their own UI and
+ * must not be writable through a generic text field.
+ */
+type PlainStringKey = {
+  [K in keyof CitationGraphSettings]: string extends CitationGraphSettings[K] ? K : never;
+}[keyof CitationGraphSettings];
+
+type NumberSettingKey = {
+  [K in keyof CitationGraphSettings]: number extends CitationGraphSettings[K] ? K : never;
+}[keyof CitationGraphSettings];
+
+type BooleanSettingKey = {
+  [K in keyof CitationGraphSettings]: boolean extends CitationGraphSettings[K] ? K : never;
+}[keyof CitationGraphSettings];
+
 /** Return "(from env: VAR_NAME)" if the setting is empty but the env var is set, else "". */
 function envHint(settingValue: string, envVar: string): string {
   if (settingValue) return "";
@@ -98,6 +115,99 @@ export class CitationGraphSettingTab extends PluginSettingTab {
     this.plugin = plugin;
   }
 
+  /**
+   * A text field bound to one string setting, stored trimmed.
+   *
+   * Every credential and path field was the same eleven lines with one
+   * property name changed, which is how a field ends up saving to the wrong
+   * setting after a copy-paste. `key` is checked against the settings type, so
+   * a wrong name is a compile error rather than a silently dead field.
+   */
+  private textSetting(
+    key: PlainStringKey,
+    opts: { name: string; desc: string; placeholder: string; password?: boolean }
+  ): void {
+    new Setting(this.containerEl)
+      .setName(opts.name)
+      .setDesc(opts.desc)
+      .addText((text) => {
+        // Credentials are read aloud in screenshots and screen shares far
+        // more often than they are typed.
+        if (opts.password) text.inputEl.type = "password";
+        text
+          .setPlaceholder(opts.placeholder)
+          .setValue(this.plugin.settings[key])
+          .onChange(async (value) => {
+            this.plugin.settings[key] = value.trim();
+            await this.plugin.saveSettings();
+          });
+      });
+  }
+
+  /**
+   * A text field bound to one whole-number setting.
+   *
+   * Input outside the accepted range is left in the box but not saved: the
+   * user is usually mid-typing, and writing a partial number would apply a
+   * value they never chose.
+   */
+  private numberSetting(
+    key: NumberSettingKey,
+    opts: { name: string; desc: string; placeholder: string; min: number; max?: number }
+  ): void {
+    new Setting(this.containerEl)
+      .setName(opts.name)
+      .setDesc(opts.desc)
+      .addText((text) =>
+        text
+          .setPlaceholder(opts.placeholder)
+          .setValue(String(this.plugin.settings[key]))
+          .onChange(async (value) => {
+            const n = parseInt(value, 10);
+            if (isNaN(n) || n < opts.min) return;
+            if (opts.max !== undefined && n > opts.max) return;
+            this.plugin.settings[key] = n;
+            await this.plugin.saveSettings();
+          })
+      );
+  }
+
+  /** A switch bound to one boolean setting. */
+  private toggleSetting(key: BooleanSettingKey, opts: { name: string; desc: string }): void {
+    new Setting(this.containerEl)
+      .setName(opts.name)
+      .setDesc(opts.desc)
+      .addToggle((toggle) =>
+        toggle.setValue(this.plugin.settings[key]).onChange(async (value) => {
+          this.plugin.settings[key] = value;
+          await this.plugin.saveSettings();
+        })
+      );
+  }
+
+  /**
+   * A multi-line prompt field bound to one string setting, stored verbatim.
+   *
+   * Deliberately not trimmed: leading and trailing blank lines are part of a
+   * prompt the user wrote.
+   */
+  private promptSetting(key: PlainStringKey, opts: { name: string; desc: string }): void {
+    new Setting(this.containerEl)
+      .setName(opts.name)
+      .setDesc(opts.desc)
+      .addTextArea((text) => {
+        text
+          .setPlaceholder("Leave blank to use the built-in default prompt.")
+          .setValue(this.plugin.settings[key])
+          .onChange(async (value) => {
+            this.plugin.settings[key] = value;
+            await this.plugin.saveSettings();
+          });
+        text.inputEl.rows = 8;
+        text.inputEl.addClass("citation-graph-prompt-input");
+      });
+  }
+
   display(): void {
     const { containerEl } = this;
     containerEl.empty();
@@ -123,58 +233,32 @@ export class CitationGraphSettingTab extends PluginSettingTab {
     // --- Zotero ---
     new Setting(containerEl).setName("Zotero").setHeading();
 
-    new Setting(containerEl)
-      .setName("Zotero API key")
-      .setDesc(
+    this.textSetting("zoteroApiKey", {
+      name: "Zotero API key",
+      desc:
         "Required for syncing papers to Zotero. Get one at zotero.org → Settings → Security → Applications" +
-        envHint(this.plugin.settings.zoteroApiKey, "ZOTERO_API_KEY")
-      )
-      .addText((text) => {
-        // Masked like every other credential field: these settings are read
-        // aloud in screenshots and screen shares far more often than they are
-        // typed, and a Zotero key grants full read/write to the library.
-        text.inputEl.type = "password";
-        text
-          .setPlaceholder("Enter API key")
-          .setValue(this.plugin.settings.zoteroApiKey)
-          .onChange(async (value) => {
-            this.plugin.settings.zoteroApiKey = value.trim();
-            await this.plugin.saveSettings();
-          });
-      });
+        envHint(this.plugin.settings.zoteroApiKey, "ZOTERO_API_KEY"),
+      placeholder: "Enter API key",
+      password: true,
+    });
 
-    new Setting(containerEl)
-      .setName("Zotero user ID")
-      .setDesc("Numeric user ID shown at zotero.org → Settings → Security → Applications")
-      .addText((text) =>
-        text
-          .setPlaceholder("12345678")
-          .setValue(this.plugin.settings.zoteroUserId)
-          .onChange(async (value) => {
-            this.plugin.settings.zoteroUserId = value.trim();
-            await this.plugin.saveSettings();
-          })
-      );
+    this.textSetting("zoteroUserId", {
+      name: "Zotero user ID",
+      desc: "Numeric user ID shown at zotero.org → Settings → Security → Applications",
+      placeholder: "12345678",
+    });
 
     // --- Semantic Scholar ---
     new Setting(containerEl).setName("Semantic Scholar").setHeading();
 
-    new Setting(containerEl)
-      .setName("API key (optional)")
-      .setDesc(
+    this.textSetting("semanticScholarApiKey", {
+      name: "API key (optional)",
+      desc:
         "For higher rate limits (1000 req/min vs 100 req/5min). Get one at semanticscholar.org/product/api#api-key-form" +
-        envHint(this.plugin.settings.semanticScholarApiKey, "SEMANTIC_SCHOLAR_API_KEY")
-      )
-      .addText((text) => {
-        text.inputEl.type = "password";
-        text
-          .setPlaceholder("Optional API key")
-          .setValue(this.plugin.settings.semanticScholarApiKey)
-          .onChange(async (value) => {
-            this.plugin.settings.semanticScholarApiKey = value.trim();
-            await this.plugin.saveSettings();
-          });
-      });
+        envHint(this.plugin.settings.semanticScholarApiKey, "SEMANTIC_SCHOLAR_API_KEY"),
+      placeholder: "Optional API key",
+      password: true,
+    });
 
     new Setting(containerEl)
       .setName("Reference cache")
@@ -196,77 +280,38 @@ export class CitationGraphSettingTab extends PluginSettingTab {
       cls: "setting-item-description",
     });
 
-    new Setting(containerEl)
-      .setName("OpenAlex")
-      .setDesc("Free academic database with broad citation coverage")
-      .addToggle((toggle) =>
-        toggle
-          .setValue(this.plugin.settings.enableOpenAlex)
-          .onChange(async (value) => {
-            this.plugin.settings.enableOpenAlex = value;
-            await this.plugin.saveSettings();
-          })
-      );
+    this.toggleSetting("enableOpenAlex", {
+      name: "OpenAlex",
+      desc: "Free academic database with broad citation coverage",
+    });
 
-    new Setting(containerEl)
-      .setName("CrossRef")
-      .setDesc("Publisher metadata (references only, when deposited by publishers)")
-      .addToggle((toggle) =>
-        toggle
-          .setValue(this.plugin.settings.enableCrossRef)
-          .onChange(async (value) => {
-            this.plugin.settings.enableCrossRef = value;
-            await this.plugin.saveSettings();
-          })
-      );
+    this.toggleSetting("enableCrossRef", {
+      name: "CrossRef",
+      desc: "Publisher metadata (references only, when deposited by publishers)",
+    });
 
-    new Setting(containerEl)
-      .setName("Email for polite access")
-      .setDesc("Providing an email gives better rate limits on OpenAlex and CrossRef (recommended)")
-      .addText((text) =>
-        text
-          .setPlaceholder("you@example.com")
-          .setValue(this.plugin.settings.openAlexEmail)
-          .onChange(async (value) => {
-            this.plugin.settings.openAlexEmail = value.trim();
-            await this.plugin.saveSettings();
-          })
-      );
+    this.textSetting("openAlexEmail", {
+      name: "Email for polite access",
+      desc: "Providing an email gives better rate limits on OpenAlex and CrossRef (recommended)",
+      placeholder: "you@example.com",
+    });
 
     // --- Canvas ---
     new Setting(containerEl).setName("Canvas").setHeading();
 
-    new Setting(containerEl)
-      .setName("Node width")
-      .setDesc("Width of paper nodes on canvas (pixels)")
-      .addText((text) =>
-        text
-          .setPlaceholder("300")
-          .setValue(String(this.plugin.settings.nodeWidth))
-          .onChange(async (value) => {
-            const n = parseInt(value, 10);
-            if (!isNaN(n) && n > 0) {
-              this.plugin.settings.nodeWidth = n;
-              await this.plugin.saveSettings();
-            }
-          })
-      );
+    this.numberSetting("nodeWidth", {
+      name: "Node width",
+      desc: "Width of paper nodes on canvas (pixels)",
+      placeholder: "300",
+      min: 1,
+    });
 
-    new Setting(containerEl)
-      .setName("Node height")
-      .setDesc("Height of paper nodes on canvas (pixels)")
-      .addText((text) =>
-        text
-          .setPlaceholder("200")
-          .setValue(String(this.plugin.settings.nodeHeight))
-          .onChange(async (value) => {
-            const n = parseInt(value, 10);
-            if (!isNaN(n) && n > 0) {
-              this.plugin.settings.nodeHeight = n;
-              await this.plugin.saveSettings();
-            }
-          })
-      );
+    this.numberSetting("nodeHeight", {
+      name: "Node height",
+      desc: "Height of paper nodes on canvas (pixels)",
+      placeholder: "200",
+      min: 1,
+    });
 
     // --- Reading status colors ---
     new Setting(containerEl).setName("Reading status colors").setHeading();
@@ -323,7 +368,7 @@ export class CitationGraphSettingTab extends PluginSettingTab {
           .setValue(isCustomColor(stored) ? CUSTOM_COLOR : stored)
           .onChange(async (value) => {
             const custom = value === CUSTOM_COLOR;
-            this.plugin.settings[key] = custom ? (hex as StatusColor) : (value as StatusColor);
+            this.plugin.settings[key] = custom ? hex : (value as StatusColor);
             showHexField(custom);
             await this.plugin.saveSettings();
             refreshClashWarning();
@@ -346,7 +391,7 @@ export class CitationGraphSettingTab extends PluginSettingTab {
             if (!valid) return;
             hex = parsed;
             text.inputEl.setCssProps({ "--cg-swatch": parsed });
-            this.plugin.settings[key] = parsed as StatusColor;
+            this.plugin.settings[key] = parsed;
             await this.plugin.saveSettings();
             refreshClashWarning();
           });
@@ -385,44 +430,28 @@ export class CitationGraphSettingTab extends PluginSettingTab {
       });
 
     if (this.plugin.settings.llmProvider === "claude-cli") {
-      new Setting(containerEl)
-        .setName("Claude CLI path")
-        .setDesc(
+      this.textSetting("claudeCliPath", {
+        name: "Claude CLI path",
+        desc:
           "Leave blank to auto-detect: the plugin will first check ~/.local/bin/claude " +
           "(the official installer's location), then fall back to 'claude' on Obsidian's PATH. " +
-          "Set an absolute path here only if auto-detection fails or you want to override it."
-        )
-        .addText((text) =>
-          text
-            .setPlaceholder("claude")
-            .setValue(this.plugin.settings.claudeCliPath)
-            .onChange(async (value) => {
-              this.plugin.settings.claudeCliPath = value.trim();
-              await this.plugin.saveSettings();
-            })
-        );
+          "Set an absolute path here only if auto-detection fails or you want to override it.",
+        placeholder: "claude",
+      });
     }
 
     if (this.plugin.settings.llmProvider !== "claude-cli") {
-      new Setting(containerEl)
-        .setName("API key")
-        .setDesc(
+      this.textSetting("llmApiKey", {
+        name: "API key",
+        desc:
           `API key for ${providerLabels[this.plugin.settings.llmProvider] ?? "the selected provider"}` +
           envHint(
             this.plugin.settings.llmApiKey,
             LLM_PROVIDER_ENV_VAR[this.plugin.settings.llmProvider] ?? ""
-          )
-        )
-        .addText((text) => {
-          text.inputEl.type = "password";
-          text
-            .setPlaceholder("sk-...")
-            .setValue(this.plugin.settings.llmApiKey)
-            .onChange(async (value) => {
-              this.plugin.settings.llmApiKey = value.trim();
-              await this.plugin.saveSettings();
-            });
-        });
+          ),
+        placeholder: "sk-...",
+        password: true,
+      });
     }
 
     // Shown for every provider, Claude CLI included: the CLI takes a --model
@@ -430,160 +459,79 @@ export class CitationGraphSettingTab extends PluginSettingTab {
     // silently carry a stale model name over from a previously selected
     // provider.
     const defaultModel = defaultModelForProvider(this.plugin.settings.llmProvider);
-    new Setting(containerEl)
-      .setName("Model")
-      .setDesc(`Model name (leave empty for default: ${defaultModel})`)
-      .addText((text) =>
-        text
-          .setPlaceholder(defaultModel)
-          .setValue(this.plugin.settings.llmModel)
-          .onChange(async (value) => {
-            this.plugin.settings.llmModel = value.trim();
-            await this.plugin.saveSettings();
-          })
-      );
+    this.textSetting("llmModel", {
+      name: "Model",
+      desc: `Model name (leave empty for default: ${defaultModel})`,
+      placeholder: defaultModel,
+    });
 
-    new Setting(containerEl)
-      .setName("Max output tokens")
-      .setDesc("Maximum tokens per summary response (controls length and cost)")
-      .addText((text) =>
-        text
-          .setPlaceholder("1024")
-          .setValue(String(this.plugin.settings.llmMaxOutputTokens))
-          .onChange(async (value) => {
-            const n = parseInt(value, 10);
-            if (!isNaN(n) && n > 0) {
-              this.plugin.settings.llmMaxOutputTokens = n;
-              await this.plugin.saveSettings();
-            }
-          })
-      );
+    this.numberSetting("llmMaxOutputTokens", {
+      name: "Max output tokens",
+      desc: "Maximum tokens per summary response (controls length and cost)",
+      placeholder: "1024",
+      min: 1,
+    });
 
-    new Setting(containerEl)
-      .setName("Batch token budget")
-      .setDesc("Stop batch summarization after this many total tokens (0 = unlimited). Not tracked with Claude CLI.")
-      .addText((text) =>
-        text
-          .setPlaceholder("0")
-          .setValue(String(this.plugin.settings.llmBatchTokenBudget))
-          .onChange(async (value) => {
-            const n = parseInt(value, 10);
-            if (!isNaN(n) && n >= 0) {
-              this.plugin.settings.llmBatchTokenBudget = n;
-              await this.plugin.saveSettings();
-            }
-          })
-      );
+    this.numberSetting("llmBatchTokenBudget", {
+      name: "Batch token budget",
+      desc: "Stop batch summarization after this many total tokens (0 = unlimited). Not tracked with Claude CLI.",
+      placeholder: "0",
+      min: 0,
+    });
 
-    new Setting(containerEl)
-      .setName("Summary prompt")
-      .setDesc(
+    this.promptSetting("summaryPrompt", {
+      name: "Summary prompt",
+      desc:
         "Custom prompt for the Write Summary command. Leave blank to use the built-in default. " +
-        "Supports placeholders: {title}, {authors}, {year}. The PDF is attached automatically."
-      )
-      .addTextArea((text) => {
-        text
-          .setPlaceholder("Leave blank to use the built-in default prompt.")
-          .setValue(this.plugin.settings.summaryPrompt)
-          .onChange(async (value) => {
-            this.plugin.settings.summaryPrompt = value;
-            await this.plugin.saveSettings();
-          });
-        text.inputEl.rows = 8;
-        text.inputEl.addClass("citation-graph-prompt-input");
-      });
+        "Supports placeholders: {title}, {authors}, {year}. The PDF is attached automatically.",
+    });
 
     // --- Recommendations ---
     new Setting(containerEl).setName("Recommendations").setHeading();
 
-    new Setting(containerEl)
-      .setName("Papers to suggest")
-      .setDesc(
+    this.numberSetting("recommendCount", {
+      name: "Papers to suggest",
+      desc:
         "How many papers the Recommend papers command asks for per run (1 to 50). " +
-        "Each suggestion costs one Semantic Scholar request to verify, so a large number means a long wait."
-      )
-      .addText((text) =>
-        text
-          .setPlaceholder("10")
-          .setValue(String(this.plugin.settings.recommendCount))
-          .onChange(async (value) => {
-            const n = parseInt(value, 10);
-            if (!isNaN(n) && n > 0 && n <= 50) {
-              this.plugin.settings.recommendCount = n;
-              await this.plugin.saveSettings();
-            }
-          })
-      );
+        "Each suggestion costs one Semantic Scholar request to verify, so a large number means a long wait.",
+      placeholder: "10",
+      min: 1,
+      max: 50,
+    });
 
-    new Setting(containerEl)
-      .setName("Search the web")
-      .setDesc(
+    this.toggleSetting("recommendWebSearch", {
+      name: "Search the web",
+      desc:
         "Let the model search the web while recommending, instead of relying on its training data alone. " +
         "Supported by the Anthropic API, Google Gemini and the Claude CLI; the OpenAI endpoint this plugin uses has no search tool. " +
-        "Searching costs extra input tokens."
-      )
-      .addToggle((toggle) =>
-        toggle
-          .setValue(this.plugin.settings.recommendWebSearch)
-          .onChange(async (value) => {
-            this.plugin.settings.recommendWebSearch = value;
-            await this.plugin.saveSettings();
-          })
-      );
+        "Searching costs extra input tokens.",
+    });
 
-    new Setting(containerEl)
-      .setName("Max output tokens")
-      .setDesc(
+    this.numberSetting("recommendMaxOutputTokens", {
+      name: "Max output tokens",
+      desc:
         "Maximum tokens per recommendation response. A list of ten papers with reasons needs more room than a summary, " +
-        "and a truncated reply cannot be read back."
-      )
-      .addText((text) =>
-        text
-          .setPlaceholder("4096")
-          .setValue(String(this.plugin.settings.recommendMaxOutputTokens))
-          .onChange(async (value) => {
-            const n = parseInt(value, 10);
-            if (!isNaN(n) && n > 0) {
-              this.plugin.settings.recommendMaxOutputTokens = n;
-              await this.plugin.saveSettings();
-            }
-          })
-      );
+        "and a truncated reply cannot be read back.",
+      placeholder: "4096",
+      min: 1,
+    });
 
-    new Setting(containerEl)
-      .setName("Recommendation prompt")
-      .setDesc(
+    this.promptSetting("recommendPrompt", {
+      name: "Recommendation prompt",
+      desc:
         "Standing instructions for the Recommend papers command. Leave blank to use the built-in default, " +
         "and note that the command's own prompt box overrides this for a single run. " +
-        "The canvas paper list and the required JSON reply format are always appended, so a custom prompt cannot break the answer."
-      )
-      .addTextArea((text) => {
-        text
-          .setPlaceholder("Leave blank to use the built-in default prompt.")
-          .setValue(this.plugin.settings.recommendPrompt)
-          .onChange(async (value) => {
-            this.plugin.settings.recommendPrompt = value;
-            await this.plugin.saveSettings();
-          });
-        text.inputEl.rows = 8;
-        text.inputEl.addClass("citation-graph-prompt-input");
-      });
+        "The canvas paper list and the required JSON reply format are always appended, so a custom prompt cannot break the answer.",
+    });
 
     // --- Download ---
     new Setting(containerEl).setName("Download").setHeading();
 
-    new Setting(containerEl)
-      .setName("Default download path")
-      .setDesc("Fallback filesystem path to look for paper PDFs (used by Write Summary if the canvas download path has no match)")
-      .addText((text) =>
-        text
-          .setPlaceholder("/home/user/papers")
-          .setValue(this.plugin.settings.defaultDownloadPath)
-          .onChange(async (value) => {
-            this.plugin.settings.defaultDownloadPath = value.trim();
-            await this.plugin.saveSettings();
-          })
-      );
+    this.textSetting("defaultDownloadPath", {
+      name: "Default download path",
+      desc: "Fallback filesystem path to look for paper PDFs (used by Write Summary if the canvas download path has no match)",
+      placeholder: "/home/user/papers",
+    });
 
     // --- Banned Papers ---
     new Setting(containerEl).setName("Banned papers").setHeading();
@@ -759,9 +707,8 @@ class BannedPapersManagerModal extends Modal {
         text: "Remove",
         cls: "citation-graph-banned-remove",
       });
-      removeBtn.addEventListener("click", async () => {
-        await this.removeBannedPaper(paper.id);
-        this.renderList();
+      removeBtn.addEventListener("click", () => {
+        void this.removeBannedPaper(paper.id).then(() => this.renderList());
       });
     }
   }

@@ -1,6 +1,7 @@
 import { App, TFile, normalizePath } from "obsidian";
 import type { Paper, PaperStatus, DisplayStatus } from "../types";
 import { parsePaperStatus } from "../types";
+import { truncateToBytes } from "../paper-files";
 
 /**
  * Byte budget for a note's filename, leaving room for the ".md" suffix and the
@@ -8,20 +9,6 @@ import { parsePaperStatus } from "../types";
  * and NTFS.
  */
 const MAX_NOTE_NAME_BYTES = 200;
-
-/** Truncate to at most `maxBytes` of UTF-8 without splitting a code point. */
-function truncateToBytes(value: string, maxBytes: number): string {
-  if (Buffer.byteLength(value, "utf8") <= maxBytes) return value;
-  let out = "";
-  let used = 0;
-  for (const ch of value) {
-    const size = Buffer.byteLength(ch, "utf8");
-    if (used + size > maxBytes) break;
-    out += ch;
-    used += size;
-  }
-  return out;
-}
 
 /**
  * Percent-encode the characters that are structurally significant inside a
@@ -139,8 +126,35 @@ export function readFrontmatterArxiv(
   fm: Record<string, unknown> | undefined | null
 ): string | null {
   const value = fm?.arxiv;
-  if (value === undefined || value === null || value === "") return null;
-  return String(value);
+  // Numbers are the case this exists for: YAML reads a bare 2108.07909 as a
+  // float. Anything else stringifies to nothing useful, so it reads as absent.
+  if (typeof value === "string") return value === "" ? null : value;
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  return null;
+}
+
+/**
+ * `FileManager.processFrontMatter` with the frontmatter typed.
+ *
+ * Obsidian hands the callback an `any`, and an `any` spreads through
+ * everything it touches. The object genuinely is a bag of unknown values: it
+ * is YAML the user can edit by hand, so `Record<string, unknown>` is both
+ * safer and more honest.
+ */
+function editFrontmatter(
+  app: App,
+  file: TFile,
+  edit: (fm: Record<string, unknown>) => void
+): Promise<void> {
+  return app.fileManager.processFrontMatter(file, edit);
+}
+
+/** A note's frontmatter as an object of unknown values, or null. */
+function frontmatterOf(app: App, file: TFile): Record<string, unknown> | null {
+  const fm: unknown = app.metadataCache.getFileCache(file)?.frontmatter;
+  return typeof fm === "object" && fm !== null && !Array.isArray(fm)
+    ? (fm as Record<string, unknown>)
+    : null;
 }
 
 /** Create and find literature notes for papers */
@@ -193,7 +207,7 @@ export class LiteratureNoteManager {
     };
     const files = this.app.vault.getMarkdownFiles();
     for (let rank = 0; rank < files.length; rank++) {
-      const fm = this.app.metadataCache.getFileCache(files[rank])?.frontmatter;
+      const fm = frontmatterOf(this.app, files[rank]);
       if (!fm) continue;
       indexNote(index, files[rank], rank, {
         doi: fm.doi,
@@ -275,7 +289,7 @@ ${paper.arxiv ? `**arXiv**: [${escapeNoteText(paper.arxiv)}](https://arxiv.org/a
 `;
 
     const file = await this.app.vault.create(path, body);
-    await this.app.fileManager.processFrontMatter(file, (fm) => {
+    await editFrontmatter(this.app, file, (fm) => {
       fm.title = paper.title;
       fm.authors = paper.authors || [];
       fm.year = paper.year || null;
@@ -300,7 +314,7 @@ ${paper.arxiv ? `**arXiv**: [${escapeNoteText(paper.arxiv)}](https://arxiv.org/a
   private async updateFrontmatter(file: TFile, paper: Paper): Promise<void> {
     // Let Obsidian handle YAML encoding and multi-line values correctly.
     let addedArxiv = false;
-    await this.app.fileManager.processFrontMatter(file, (fm) => {
+    await editFrontmatter(this.app, file, (fm) => {
       if ((fm.arxiv == null || fm.arxiv === "null") && paper.arxiv) {
         fm.arxiv = paper.arxiv;
         addedArxiv = true;
@@ -349,7 +363,7 @@ ${paper.arxiv ? `**arXiv**: [${escapeNoteText(paper.arxiv)}](https://arxiv.org/a
    * lack it, and the canvas styling keys off it.
    */
   async ensureNoteClass(file: TFile): Promise<void> {
-    await this.app.fileManager.processFrontMatter(file, (fm) => {
+    await editFrontmatter(this.app, file, (fm) => {
       const classes = normalizeCssClasses(fm.cssclasses);
       if (classes.includes(NOTE_CLASS)) return;
       classes.unshift(NOTE_CLASS);
@@ -365,7 +379,7 @@ ${paper.arxiv ? `**arXiv**: [${escapeNoteText(paper.arxiv)}](https://arxiv.org/a
    * status, and not stripped of any colour the user set on them by hand.
    */
   isPaperNote(file: TFile): boolean {
-    const fm = this.app.metadataCache.getFileCache(file)?.frontmatter;
+    const fm = frontmatterOf(this.app, file);
     if (!fm) return false;
     return PAPER_ID_FIELDS.some((key) => key in fm);
   }
@@ -375,7 +389,7 @@ ${paper.arxiv ? `**arXiv**: [${escapeNoteText(paper.arxiv)}](https://arxiv.org/a
    * existed carry a boolean `read`, which maps to "read"/"unread".
    */
   getStatus(file: TFile): PaperStatus {
-    const fm = this.app.metadataCache.getFileCache(file)?.frontmatter;
+    const fm = frontmatterOf(this.app, file);
     const stored = parsePaperStatus(fm?.status);
     if (stored) return stored;
     return fm?.read === true ? "read" : "unread";
@@ -448,7 +462,7 @@ ${paper.arxiv ? `**arXiv**: [${escapeNoteText(paper.arxiv)}](https://arxiv.org/a
     next: (current: PaperStatus) => PaperStatus
   ): Promise<PaperStatus> {
     let written: PaperStatus = "unread";
-    await this.app.fileManager.processFrontMatter(file, (fm) => {
+    await editFrontmatter(this.app, file, (fm) => {
       const stored =
         parsePaperStatus(fm.status) ?? (fm.read === true ? "read" : "unread");
       written = next(stored);
@@ -474,7 +488,7 @@ ${paper.arxiv ? `**arXiv**: [${escapeNoteText(paper.arxiv)}](https://arxiv.org/a
    */
   async syncNoteClass(file: TFile, status?: DisplayStatus | null): Promise<boolean> {
     let changed = false;
-    await this.app.fileManager.processFrontMatter(file, (fm) => {
+    await editFrontmatter(this.app, file, (fm) => {
       const current = normalizeCssClasses(fm.cssclasses);
       const next = withNoteClass(current, status);
       changed =

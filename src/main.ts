@@ -41,20 +41,19 @@ import { CrossRefClient } from "./api/crossref";
 import { ArxivMetadataClient } from "./api/arxiv-metadata";
 import { resolvePaperWithRefs } from "./api/multi-source";
 import { findArxivId } from "./api/arxiv-lookup";
+import { asNumber, asRecord, asString, asStringArray } from "./api/json";
 import { fetchRefsAndCitations } from "./api/multi-source";
 import { CollectionPickerModal } from "./modals/collection-picker";
 import { TagPickerModal } from "./modals/tag-picker";
 import { ExpandPickerModal } from "./modals/expand-picker";
-import { DownloadPickerModal, downloadPapers, buildPaperFilename, expandTilde } from "./modals/download-picker";
+import { DownloadPickerModal, downloadPapers, buildPaperFilename } from "./modals/download-picker";
+import { assertInsideFolders, fileInFolder, resolveFolder } from "./paper-files";
 import { SendPickerModal } from "./modals/send-picker";
 import { RecommendPromptModal } from "./modals/recommend-prompt-modal";
 import { RecommendPickerModal } from "./modals/recommend-picker";
 import { StatusPickerModal } from "./modals/status-picker";
-import {
-  BatchMissingPdfModal,
-  BatchLongPaperWarningModal,
-  BatchSummaryModeModal,
-} from "./modals/batch-summary-modals";
+import { PromiseModal } from "./modals/promise-modal";
+import { askChoice } from "./modals/choice-modal";
 import type { BannedPaper } from "./types";
 import { LiteratureNoteManager, readFrontmatterArxiv } from "./notes/literature";
 import { hasSummarySection, insertSummaryText } from "./notes/summary-text";
@@ -140,6 +139,39 @@ function canvasViewOf(leaf: WorkspaceLeaf): CanvasViewInternals {
   return leaf.view as unknown as CanvasViewInternals;
 }
 
+/**
+ * Build a Paper from a literature note's frontmatter.
+ *
+ * Every field is narrowed rather than trusted. Frontmatter is untyped as far
+ * as Obsidian is concerned, and the user can edit it by hand on top of that,
+ * so a value of the wrong shape reads as absent, which is what the rest of the
+ * plugin already expects from a note missing a field.
+ *
+ * Abstract and citation count are always empty: they are not stored in
+ * frontmatter, and every caller either does not need them or fetches them.
+ */
+function paperFromFrontmatter(
+  fm: Record<string, unknown>,
+  fallbackId: string,
+  notePath: string
+): Paper {
+  const doi = asString(fm.doi);
+  const semanticScholarId = asString(fm.semantic_scholar_id);
+  return {
+    id: doi ?? semanticScholarId ?? fallbackId,
+    title: asString(fm.title) ?? "Untitled",
+    authors: asStringArray(fm.authors),
+    year: asNumber(fm.year) ?? 0,
+    doi,
+    arxiv: readFrontmatterArxiv(fm),
+    citekey: asString(fm.citekey),
+    semanticScholarId,
+    abstract: null,
+    citationCount: null,
+    notePath,
+  };
+}
+
 /** The note path behind every paper node on a canvas. */
 function notePathsOf(nodes: CanvasNode[]): string[] {
   return nodes
@@ -189,121 +221,82 @@ export default class CitationGraphPlugin extends Plugin {
     this.arxivClient = new ArxivMetadataClient();
     this.applyApiCredentials();
 
-    this.addCommand({
-      id: "create-from-collection",
-      name: "Canvas: create from collection",
-      callback: () => this.createFromCollection(),
-    });
-
-    this.addCommand({
-      id: "create-from-tag",
-      name: "Canvas: create from tag",
-      callback: () => this.createFromTag(),
-    });
-
-    this.addCommand({
-      id: "expand-paper",
-      name: "Papers: expand paper",
-      checkCallback: this.canvasCommand(() => this.expandPaper()),
-    });
-
-    this.addCommand({
-      id: "expand-paper-refresh",
-      name: "Papers: expand paper (force refresh)",
-      checkCallback: this.canvasCommand(() => this.expandPaper({ forceRefresh: true })),
-    });
-
-    this.addCommand({
-      id: "clear-s2-cache",
-      name: "Maintenance: clear Semantic Scholar cache",
-      callback: async () => {
-        this.s2Cache.clear();
-        await this.s2Cache.save();
-        new Notice("Semantic Scholar cache cleared.");
-      },
-    });
-
-    this.addCommand({
-      id: "relayout-canvas",
-      name: "Canvas: relayout",
-      checkCallback: this.canvasCommand(() => this.relayoutCanvas()),
-    });
-
-    this.addCommand({
-      id: "resolve-missing-edges",
-      name: "Canvas: resolve missing citation edges",
-      checkCallback: this.canvasCommand(() => this.resolveMissingEdges()),
-    });
-
-    this.addCommand({
-      id: "resolve-missing-edges-refresh",
-      name: "Canvas: resolve missing citation edges (force refresh)",
-      checkCallback: this.canvasCommand(() =>
-        this.resolveMissingEdges({ forceRefresh: true })
-      ),
-    });
-
-    this.addCommand({
-      id: "sync-to-zotero",
-      name: "Canvas: sync to Zotero",
-      checkCallback: this.canvasCommand(() => this.syncToZotero()),
-    });
-
-    this.addCommand({
-      id: "download-papers",
-      name: "PDFs: download",
-      checkCallback: this.canvasCommand(() => this.downloadPapersFromCanvas()),
-    });
-
-    this.addCommand({
-      id: "add-paper-by-doi",
-      name: "Papers: add by DOI or arXiv",
-      checkCallback: this.canvasCommand(() => this.addPaperByDoi()),
-    });
-
-    this.addCommand({
-      id: "refresh-reading-status",
-      name: "Reading: refresh reading status",
-      checkCallback: this.canvasCommand(() => this.refreshReadingStatus()),
-    });
-
-    this.addCommand({
-      id: "set-paper-status",
-      name: "Reading: set paper status",
-      checkCallback: this.canvasCommand(() => this.setPaperStatus()),
-    });
-
-    this.addCommand({
-      id: "toggle-read-status",
-      name: "Reading: cycle reading status",
-      checkCallback: this.canvasCommand(() => this.cycleReadingStatus()),
-    });
-
-    this.addCommand({
-      id: "send-papers-to-canvas",
-      name: "Canvas: send papers to another canvas",
-      checkCallback: this.canvasCommand(() => this.sendPapersToCanvas()),
-    });
-
-    this.addCommand({
-      id: "write-summary",
-      name: "PDFs: write summary",
-      checkCallback: this.canvasCommand(() => this.writeSummary()),
-    });
-
-    this.addCommand({
-      id: "recommend-papers",
-      name: "Papers: recommend papers",
-      checkCallback: this.canvasCommand(() => this.recommendPapers()),
-    });
-
-    this.addCommand({
-      id: "delete-paper",
-      name: "Papers: delete paper",
-      checkCallback: this.canvasCommand(() => this.deletePaper()),
-    });
-
+    this.registerCommands();
     this.registerPaperContextMenu();
+  }
+
+  /**
+   * Register every command in the palette.
+   *
+   * Two tables rather than eighteen near-identical blocks: the first holds the
+   * commands that need a canvas open and so go through `canvasCommand`, the
+   * second the ones that work anywhere. Adding a command means adding a row,
+   * which is also what stops a new one from quietly missing the canvas guard.
+   */
+  private registerCommands(): void {
+    const canvasCommands: Array<[id: string, name: string, run: () => unknown]> = [
+      ["expand-paper", "Papers: expand paper", () => this.expandPaper()],
+      [
+        "expand-paper-refresh",
+        "Papers: expand paper (force refresh)",
+        () => this.expandPaper({ forceRefresh: true }),
+      ],
+      ["relayout-canvas", "Canvas: relayout", () => this.relayoutCanvas()],
+      [
+        "resolve-missing-edges",
+        "Canvas: resolve missing citation edges",
+        () => this.resolveMissingEdges(),
+      ],
+      [
+        "resolve-missing-edges-refresh",
+        "Canvas: resolve missing citation edges (force refresh)",
+        () => this.resolveMissingEdges({ forceRefresh: true }),
+      ],
+      ["sync-to-zotero", "Canvas: sync to Zotero", () => this.syncToZotero()],
+      ["download-papers", "PDFs: download", () => this.downloadPapersFromCanvas()],
+      ["add-paper-by-doi", "Papers: add by DOI or arXiv", () => this.addPaperByDoi()],
+      [
+        "refresh-reading-status",
+        "Reading: refresh reading status",
+        () => this.refreshReadingStatus(),
+      ],
+      ["set-paper-status", "Reading: set paper status", () => this.setPaperStatus()],
+      ["toggle-read-status", "Reading: cycle reading status", () => this.cycleReadingStatus()],
+      [
+        "send-papers-to-canvas",
+        "Canvas: send papers to another canvas",
+        () => this.sendPapersToCanvas(),
+      ],
+      ["write-summary", "PDFs: write summary", () => this.writeSummary()],
+      ["recommend-papers", "Papers: recommend papers", () => this.recommendPapers()],
+      ["delete-paper", "Papers: delete paper", () => this.deletePaper()],
+    ];
+
+    for (const [id, name, run] of canvasCommands) {
+      this.addCommand({ id, name, checkCallback: this.canvasCommand(run) });
+    }
+
+    const anywhereCommands: Array<[id: string, name: string, run: () => unknown]> = [
+      [
+        "create-from-collection",
+        "Canvas: create from collection",
+        () => this.createFromCollection(),
+      ],
+      ["create-from-tag", "Canvas: create from tag", () => this.createFromTag()],
+      [
+        "clear-s2-cache",
+        "Maintenance: clear Semantic Scholar cache",
+        async () => {
+          this.s2Cache.clear();
+          await this.s2Cache.save();
+          new Notice("Semantic Scholar cache cleared.");
+        },
+      ],
+    ];
+
+    for (const [id, name, callback] of anywhereCommands) {
+      this.addCommand({ id, name, callback });
+    }
   }
 
   /**
@@ -434,10 +427,13 @@ export default class CitationGraphPlugin extends Plugin {
       const noteFile = this.app.vault.getAbstractFileByPath(notePath);
       if (!(noteFile instanceof TFile)) continue;
       try {
-        await this.app.fileManager.processFrontMatter(noteFile, (fm) => {
-          if (readFrontmatterArxiv(fm)) return;
-          fm.arxiv = arxivId;
-        });
+        await this.app.fileManager.processFrontMatter(
+          noteFile,
+          (fm: Record<string, unknown>) => {
+            if (readFrontmatterArxiv(fm)) return;
+            fm.arxiv = arxivId;
+          }
+        );
       } catch (e) {
         console.error(
           `Citation Graph: could not record the arXiv ID on ${notePath}`,
@@ -475,7 +471,9 @@ export default class CitationGraphPlugin extends Plugin {
   }
 
   async loadSettings(): Promise<void> {
-    const saved = await this.loadData();
+    // loadData is typed `any`; what is on disk is last release's settings file,
+    // which the user may also have edited, so it is read as unknown fields.
+    const saved: Record<string, unknown> = asRecord(await this.loadData()) ?? {};
     const merged = Object.assign({}, DEFAULT_SETTINGS, saved) as CitationGraphSettings & {
       canvasFolder?: string;
       literatureNotesFolder?: string;
@@ -485,8 +483,10 @@ export default class CitationGraphPlugin extends Plugin {
     // One-time migration: fold the old separate folder settings into the
     // unified collectionsFolder, and forget legacy keys we no longer use.
     let changed = false;
-    if (saved && !saved.collectionsFolder && (saved.canvasFolder || saved.literatureNotesFolder)) {
-      merged.collectionsFolder = saved.canvasFolder || saved.literatureNotesFolder || DEFAULT_SETTINGS.collectionsFolder;
+    const legacyFolder =
+      asString(saved.canvasFolder) ?? asString(saved.literatureNotesFolder);
+    if (!asString(saved.collectionsFolder) && legacyFolder) {
+      merged.collectionsFolder = legacyFolder;
       changed = true;
     }
     for (const legacy of ["canvasFolder", "literatureNotesFolder", "readColor"] as const) {
@@ -834,16 +834,15 @@ export default class CitationGraphPlugin extends Plugin {
         return;
       }
 
-      const cache = this.app.metadataCache.getFileCache(noteFile);
-      const fm = cache?.frontmatter;
+      const fm = this.frontmatterOf(targetNotePath);
       if (!fm) {
         logNotice("Literature note has no frontmatter.");
         return;
       }
 
-      const doi = fm.doi || null;
+      const doi = asString(fm.doi);
       const arxivId = readFrontmatterArxiv(fm);
-      const s2Id = fm.semantic_scholar_id || null;
+      const s2Id = asString(fm.semantic_scholar_id);
       const externalId = doi ? `DOI:${doi}` : s2Id;
 
       if (!externalId) {
@@ -886,7 +885,7 @@ export default class CitationGraphPlugin extends Plugin {
       }
 
       // 6. Determine which papers are already on canvas (by S2 ID or DOI)
-      const canvasPapers = this.canvasPapers(canvasData);
+      const canvasPapers = this.papersOnNodes(canvasData.nodes);
       const existingS2Ids = this.canvasPaperIds(canvasPapers);
 
       // 7. Show expand picker (filter out banned papers)
@@ -1022,10 +1021,7 @@ export default class CitationGraphPlugin extends Plugin {
       }
 
       // 2. Prompt for DOI or arxiv ID
-      const rawInput = await new Promise<string | null>((resolve) => {
-        const modal = new DoiInputModal(this.app, resolve);
-        modal.open();
-      });
+      const rawInput = await new DoiInputModal(this.app).askForIdentifier();
       if (!rawInput) return;
 
       // 3. Parse input: DOI URL, arxiv DOI, arxiv ID, or plain DOI
@@ -1085,7 +1081,7 @@ export default class CitationGraphPlugin extends Plugin {
       // 6. Build edges to existing papers via resolved refs/citations.
       // Matches by S2 ID, DOI (case-insensitive), and arXiv ID, since fallback
       // sources (OpenAlex/CrossRef/arXiv) don't always provide an S2 ID.
-      const canvasPapers = this.canvasPapers(canvasData);
+      const canvasPapers = this.papersOnNodes(canvasData.nodes);
       const newEdges = this.buildCitationEdges(
         paper,
         resolved.references,
@@ -1145,34 +1141,31 @@ export default class CitationGraphPlugin extends Plugin {
 
   // ─── Recommend Papers ───────────────────────────────────
 
+  /** A note's frontmatter as an object of unknown values, or null. */
+  private frontmatterOf(path: string): Record<string, unknown> | null {
+    const file = this.app.vault.getAbstractFileByPath(path);
+    if (!(file instanceof TFile)) return null;
+    return asRecord(this.app.metadataCache.getFileCache(file)?.frontmatter);
+  }
+
   /**
-   * Every canvas node that points at a literature note, read back as a Paper.
-   * Abstract and citation count are left empty: they are not stored in
-   * frontmatter, and every caller either does not need them or fetches them.
+   * Read one canvas node's literature note back as a Paper.
+   *
+   * Null when the node points at no file, the file is gone, or it has no
+   * frontmatter. A canvas holds the user's own notes beside the papers, and
+   * those are not papers.
    */
-  private canvasPapers(canvasData: CanvasData): Paper[] {
-    const papers: Paper[] = [];
-    for (const node of canvasData.nodes) {
-      if (node.type !== "file" || !node.file) continue;
-      const file = this.app.vault.getAbstractFileByPath(node.file);
-      if (!(file instanceof TFile)) continue;
-      const fm = this.app.metadataCache.getFileCache(file)?.frontmatter;
-      if (!fm) continue;
-      papers.push({
-        id: fm.doi || fm.semantic_scholar_id || node.id,
-        title: fm.title || "",
-        authors: fm.authors || [],
-        year: fm.year || 0,
-        doi: fm.doi || null,
-        arxiv: readFrontmatterArxiv(fm),
-        citekey: fm.citekey || null,
-        semanticScholarId: fm.semantic_scholar_id || null,
-        abstract: null,
-        citationCount: null,
-        notePath: node.file,
-      });
-    }
-    return papers;
+  private paperFromNode(node: CanvasNode): Paper | null {
+    if (node.type !== "file" || !node.file) return null;
+    const fm = this.frontmatterOf(node.file);
+    return fm ? paperFromFrontmatter(fm, node.id, node.file) : null;
+  }
+
+  /** Every node in a list that points at a literature note, read back as a Paper. */
+  private papersOnNodes(nodes: CanvasNode[]): Paper[] {
+    return nodes
+      .map((node) => this.paperFromNode(node))
+      .filter((paper): paper is Paper => paper !== null);
   }
 
   /**
@@ -1260,7 +1253,7 @@ export default class CitationGraphPlugin extends Plugin {
 
       const canvasData = await this.readCanvas(activeFile);
 
-      const papers = this.canvasPapers(canvasData);
+      const papers = this.papersOnNodes(canvasData.nodes);
       if (papers.length < 2) {
         logNotice(
           "This canvas has fewer than two papers, so there are no edges to resolve."
@@ -1411,7 +1404,7 @@ export default class CitationGraphPlugin extends Plugin {
         return;
       }
 
-      const existingPapers = this.canvasPapers(canvasData);
+      const existingPapers = this.papersOnNodes(canvasData.nodes);
       if (existingPapers.length === 0) {
         logNotice(
           "The notes behind this canvas have no frontmatter, so there is nothing to describe to the model."
@@ -1699,27 +1692,7 @@ export default class CitationGraphPlugin extends Plugin {
       }
 
       // 3. Build Paper objects from note frontmatter
-      const papers: Paper[] = [];
-      for (const node of fileNodes) {
-        const noteFile = this.app.vault.getAbstractFileByPath(node.file!);
-        if (!(noteFile instanceof TFile)) continue;
-        const cache = this.app.metadataCache.getFileCache(noteFile);
-        const fm = cache?.frontmatter;
-        if (!fm) continue;
-        papers.push({
-          id: fm.doi || fm.semantic_scholar_id || node.id,
-          title: fm.title || "Untitled",
-          authors: fm.authors || [],
-          year: fm.year || 0,
-          doi: fm.doi || null,
-          arxiv: readFrontmatterArxiv(fm),
-          citekey: fm.citekey || null,
-          semanticScholarId: fm.semantic_scholar_id || null,
-          abstract: null,
-          citationCount: null,
-          notePath: node.file!,
-        });
-      }
+      const papers = this.papersOnNodes(fileNodes);
 
       if (papers.length === 0) {
         logNotice("Could not read paper metadata from notes.");
@@ -1850,17 +1823,12 @@ export default class CitationGraphPlugin extends Plugin {
         doi: string | null;
       }> = [];
 
-      for (const node of fileNodes) {
-        const noteFile = this.app.vault.getAbstractFileByPath(node.file!);
-        if (!(noteFile instanceof TFile)) continue;
-        const cache = this.app.metadataCache.getFileCache(noteFile);
-        const fm = cache?.frontmatter;
-        if (!fm) continue;
+      for (const paper of this.papersOnNodes(fileNodes)) {
         canvasPapers.push({
-          title: fm.title || "Untitled",
-          authors: fm.authors || [],
-          year: fm.year || 0,
-          doi: fm.doi || null,
+          title: paper.title,
+          authors: paper.authors,
+          year: paper.year,
+          doi: paper.doi,
         });
       }
 
@@ -2081,7 +2049,7 @@ export default class CitationGraphPlugin extends Plugin {
         return;
       }
 
-      const applied = await this.applyStatusToPapers(targets, () => status);
+      const applied = (await this.applyStatusToPapers(targets, () => status)).length;
       if (applied === 0) return;
       logNotice(
         `Set ${applied} paper${applied === 1 ? "" : "s"} to "${STATUS_LABELS[status]}".`
@@ -2102,17 +2070,13 @@ export default class CitationGraphPlugin extends Plugin {
       const targets = await this.resolveCanvasTargets(paths);
       if (!targets) return;
 
-      let lastStatus: PaperStatus | null = null;
-      const applied = await this.applyStatusToPapers(targets, (current) => {
-        lastStatus = nextStatusInCycle(current);
-        return lastStatus;
-      });
+      const written = await this.applyStatusToPapers(targets, nextStatusInCycle);
 
-      if (applied === 0) return;
+      if (written.length === 0) return;
       logNotice(
-        applied === 1 && lastStatus
-          ? `Status: ${STATUS_LABELS[lastStatus]}.`
-          : `Advanced reading status for ${applied} papers.`
+        written.length === 1
+          ? `Status: ${STATUS_LABELS[written[0]]}.`
+          : `Advanced reading status for ${written.length} papers.`
       );
     } catch (e) {
       console.error("Citation Graph: Error cycling reading status", e);
@@ -2122,10 +2086,10 @@ export default class CitationGraphPlugin extends Plugin {
 
   /**
    * Write a new status to each target note and repaint its canvas node,
-   * returning how many papers were actually updated. The repaint derives the
-   * color from the status just written rather than re-reading it, so a paper
-   * that already has notes lands on "annotated" immediately without waiting
-   * for Obsidian's metadata cache to catch up with the write.
+   * returning the statuses actually written, in the order the notes were
+   * visited. The repaint derives the color from the status just written rather
+   * than re-reading it, so a paper that already has notes lands on "annotated"
+   * immediately without waiting for Obsidian's metadata cache to catch up.
    */
   private async applyStatusToPapers(
     targets: {
@@ -2134,7 +2098,7 @@ export default class CitationGraphPlugin extends Plugin {
       targetPaths: string[];
     },
     nextStatus: (current: PaperStatus) => PaperStatus
-  ): Promise<number> {
+  ): Promise<PaperStatus[]> {
     const { canvasFile, targetPaths } = targets;
     const canvasDir = canvasFile.parent?.path || normalizePath(this.settings.collectionsFolder);
     const noteManager = new LiteratureNoteManager(this.app, canvasDir);
@@ -2142,7 +2106,7 @@ export default class CitationGraphPlugin extends Plugin {
     // Every note is written and its new colour worked out before the canvas is
     // touched, because the canvas write below is synchronous.
     const colors = new Map<string, string>();
-    let updated = 0;
+    const written: PaperStatus[] = [];
     let skipped = 0;
     for (const filePath of targetPaths) {
       const noteFile = this.app.vault.getAbstractFileByPath(filePath);
@@ -2155,23 +2119,23 @@ export default class CitationGraphPlugin extends Plugin {
       // Decided and written in one pass over the file: reading the current
       // status back out of the metadata cache would see the value from before
       // the previous run of this command, and the cycle would not advance.
-      const written = await noteManager.updateStatus(noteFile, nextStatus);
-      updated++;
+      const stored = await noteManager.updateStatus(noteFile, nextStatus);
+      written.push(stored);
 
-      const display: DisplayStatus = await noteManager.displayStatusFor(noteFile, written);
+      const display: DisplayStatus = await noteManager.displayStatusFor(noteFile, stored);
       // setStatus wrote the stored status; this upgrades the class to
       // "annotated" when the note body says so, matching the colour below.
       await noteManager.syncNoteClass(noteFile, display);
       colors.set(filePath, statusColor(this.settings, display));
     }
 
-    if (updated === 0) {
+    if (written.length === 0) {
       logNotice(
         skipped > 0
           ? "Selection contains no papers. Notes that are not papers are left alone."
           : "No literature notes found for the selected papers."
       );
-      return 0;
+      return written;
     }
     if (skipped > 0) {
       logNotice(`Skipped ${skipped} note${skipped === 1 ? "" : "s"} that ${skipped === 1 ? "is" : "are"} not a paper.`);
@@ -2180,7 +2144,7 @@ export default class CitationGraphPlugin extends Plugin {
     await this.updateCanvas<CanvasMeta>(canvasFile, (canvas) => {
       paintStatusColors(canvas.nodes, colors);
     });
-    return updated;
+    return written;
   }
 
   // ─── Delete Paper ───────────────────────────────────────────
@@ -2486,28 +2450,7 @@ export default class CitationGraphPlugin extends Plugin {
       }
 
       // Rebuild Paper objects from note frontmatter
-      const papers: Paper[] = [];
-      for (const node of fileNodes) {
-        const noteFile = this.app.vault.getAbstractFileByPath(node.file!);
-        if (!(noteFile instanceof TFile)) continue;
-        const cache = this.app.metadataCache.getFileCache(noteFile);
-        const fm = cache?.frontmatter;
-        if (!fm) continue;
-
-        papers.push({
-          id: fm.doi || fm.semantic_scholar_id || node.id,
-          title: fm.title || "",
-          authors: fm.authors || [],
-          year: fm.year || 0,
-          doi: fm.doi || null,
-          arxiv: readFrontmatterArxiv(fm),
-          citekey: fm.citekey || null,
-          semanticScholarId: fm.semantic_scholar_id || null,
-          abstract: null,
-          citationCount: null,
-          notePath: node.file!,
-        });
-      }
+      const papers = this.papersOnNodes(fileNodes);
 
       if (papers.length === 0) {
         logNotice("Could not read paper metadata from notes.");
@@ -2588,27 +2531,7 @@ export default class CitationGraphPlugin extends Plugin {
         return;
       }
 
-      const sourcePapers: Paper[] = [];
-      for (const node of fileNodes) {
-        const noteFile = this.app.vault.getAbstractFileByPath(node.file!);
-        if (!(noteFile instanceof TFile)) continue;
-        const cache = this.app.metadataCache.getFileCache(noteFile);
-        const fm = cache?.frontmatter;
-        if (!fm) continue;
-        sourcePapers.push({
-          id: fm.doi || fm.semantic_scholar_id || node.id,
-          title: fm.title || "Untitled",
-          authors: fm.authors || [],
-          year: fm.year || 0,
-          doi: fm.doi || null,
-          arxiv: readFrontmatterArxiv(fm),
-          citekey: fm.citekey || null,
-          semanticScholarId: fm.semantic_scholar_id || null,
-          abstract: null,
-          citationCount: null,
-          notePath: node.file!,
-        });
-      }
+      const sourcePapers = this.papersOnNodes(fileNodes);
 
       if (sourcePapers.length === 0) {
         logNotice("Could not read paper metadata from notes.");
@@ -2758,26 +2681,7 @@ export default class CitationGraphPlugin extends Plugin {
       const allPapersMap = new Map<string, Paper>();
 
       // Papers from target canvas
-      for (const node of targetData.nodes) {
-        if (node.type !== "file" || !node.file) continue;
-        const noteFile = this.app.vault.getAbstractFileByPath(node.file);
-        if (!(noteFile instanceof TFile)) continue;
-        const cache = this.app.metadataCache.getFileCache(noteFile);
-        const fm = cache?.frontmatter;
-        if (!fm) continue;
-        const paper: Paper = {
-          id: fm.doi || fm.semantic_scholar_id || node.id,
-          title: fm.title || "Untitled",
-          authors: fm.authors || [],
-          year: fm.year || 0,
-          doi: fm.doi || null,
-          arxiv: readFrontmatterArxiv(fm),
-          citekey: fm.citekey || null,
-          semanticScholarId: fm.semantic_scholar_id || null,
-          abstract: null,
-          citationCount: null,
-          notePath: node.file,
-        };
+      for (const paper of this.papersOnNodes(targetData.nodes)) {
         allPapersMap.set(paper.id, paper);
       }
 
@@ -2912,25 +2816,9 @@ export default class CitationGraphPlugin extends Plugin {
 
       // 3. Build Paper objects from frontmatter
       const papers: Paper[] = [];
-      for (const tp of targetPaths) {
-        const noteFile = this.app.vault.getAbstractFileByPath(tp);
-        if (!(noteFile instanceof TFile)) continue;
-        const cache = this.app.metadataCache.getFileCache(noteFile);
-        const fm = cache?.frontmatter;
-        if (!fm) continue;
-        papers.push({
-          id: fm.doi || fm.semantic_scholar_id || "",
-          title: fm.title || "Untitled",
-          authors: fm.authors || [],
-          year: fm.year || 0,
-          doi: fm.doi || null,
-          arxiv: readFrontmatterArxiv(fm),
-          citekey: fm.citekey || null,
-          semanticScholarId: fm.semantic_scholar_id || null,
-          abstract: null,
-          citationCount: null,
-          notePath: tp,
-        });
+      for (const notePath of targetPaths) {
+        const fm = this.frontmatterOf(notePath);
+        if (fm) papers.push(paperFromFrontmatter(fm, "", notePath));
       }
 
       if (papers.length === 0) {
@@ -2961,7 +2849,16 @@ export default class CitationGraphPlugin extends Plugin {
     papers: Paper[],
     downloadPath: string,
   ): Promise<void> {
-    // 1. Resolve PDF paths for all papers
+    // 1. Resolve PDF paths for all papers.
+    //
+    //    These two folders are the whole of what this command may read. Every
+    //    path below is built inside one of them and checked against the pair
+    //    again before it is opened, so a filename derived from remote metadata
+    //    cannot reach a file the user never pointed the plugin at.
+    const searchFolders = [downloadPath, this.settings.defaultDownloadPath].filter(
+      (folder) => folder.trim() !== ""
+    );
+
     const withPdf: { paper: Paper; pdfPath: string }[] = [];
     const missingPdf: Paper[] = [];
 
@@ -2969,13 +2866,12 @@ export default class CitationGraphPlugin extends Plugin {
       const pdfFilename = buildPaperFilename(paper, ".pdf");
       let pdfPath: string | null = null;
 
-      if (downloadPath) {
-        const candidate = path.join(expandTilde(downloadPath), pdfFilename);
-        if (fs.existsSync(candidate)) pdfPath = candidate;
-      }
-      if (!pdfPath && this.settings.defaultDownloadPath) {
-        const candidate = path.join(expandTilde(this.settings.defaultDownloadPath), pdfFilename);
-        if (fs.existsSync(candidate)) pdfPath = candidate;
+      for (const folder of searchFolders) {
+        const candidate = fileInFolder(resolveFolder(folder), pdfFilename);
+        if (fs.existsSync(candidate)) {
+          pdfPath = candidate;
+          break;
+        }
       }
 
       if (pdfPath) {
@@ -2994,7 +2890,16 @@ export default class CitationGraphPlugin extends Plugin {
           "and no default download path configured. Skipping those."
         );
       } else {
-        const choice = await new BatchMissingPdfModal(this.app, missingPdf).pick();
+        const choice = await askChoice<"download" | "skip" | null>(this.app, {
+          title: "PDFs not found",
+          question: `${missingPdf.length} paper${missingPdf.length > 1 ? "s do" : " does"} not have a downloaded PDF:`,
+          items: missingPdf.map((p) => p.title),
+          choices: [
+            { text: "Download all", value: "download", cta: true },
+            { text: "Skip these", value: "skip" },
+          ],
+          cancelled: null,
+        });
         if (choice === null) return;
 
         if (choice === "download") {
@@ -3021,7 +2926,7 @@ export default class CitationGraphPlugin extends Plugin {
           // Re-resolve paths for the ones we tried to download
           for (const paper of missingPdf) {
             const pdfFilename = buildPaperFilename(paper, ".pdf");
-            const candidate = path.join(downloadDir, pdfFilename);
+            const candidate = fileInFolder(resolveFolder(downloadDir), pdfFilename);
             if (fs.existsSync(candidate)) {
               withPdf.push({ paper, pdfPath: candidate });
             }
@@ -3036,11 +2941,23 @@ export default class CitationGraphPlugin extends Plugin {
       return;
     }
 
-    // 3. Estimate page counts and warn about long papers
+    // 3. Estimate page counts and warn about long papers. The last check
+    //    before anything is opened: a path that is not inside one of the
+    //    folders named above never reaches the disk, and the paper is dropped
+    //    from the run with the reason in the log.
     const resolved: { paper: Paper; pdfPath: string; pages: number }[] = [];
     const longPapers: { title: string; pages: number }[] = [];
 
     for (const { paper, pdfPath } of withPdf) {
+      try {
+        assertInsideFolders(pdfPath, searchFolders);
+      } catch (e) {
+        logOnly(
+          `Skipped "${paper.title}": ${e instanceof Error ? e.message : String(e)}`
+        );
+        continue;
+      }
+
       let pages = 0;
       try {
         pages = estimatePdfPages(pdfPath);
@@ -3056,7 +2973,14 @@ export default class CitationGraphPlugin extends Plugin {
     }
 
     if (longPapers.length > 0) {
-      const proceed = await new BatchLongPaperWarningModal(this.app, longPapers).pick();
+      const proceed = await askChoice<boolean>(this.app, {
+        title: "Long paper warning",
+        question:
+          "The following papers are long and may take extra time and tokens to summarize:",
+        items: longPapers.map(({ title, pages }) => `${title} (~${pages} pages)`),
+        choices: [{ text: "Proceed with all", value: true, cta: true }],
+        cancelled: false,
+      });
       if (!proceed) return;
     }
 
@@ -3072,9 +2996,15 @@ export default class CitationGraphPlugin extends Plugin {
     }
 
     if (withSummaryCount > 0) {
-      const choice = await new BatchSummaryModeModal(
-        this.app, withSummaryCount, resolved.length
-      ).pick();
+      const choice = await askChoice<"append" | "replace" | null>(this.app, {
+        title: "Existing summaries found",
+        question: `${withSummaryCount} of ${resolved.length} selected paper${resolved.length > 1 ? "s" : ""} already have a Summary section. How should existing summaries be handled?`,
+        choices: [
+          { text: "Append (with separator)", value: "append", cta: true },
+          { text: "Replace", value: "replace", warning: true },
+        ],
+        cancelled: null,
+      });
       if (choice === null) return;
       batchSummaryMode = choice;
     }
@@ -3177,12 +3107,14 @@ function estimatePdfPages(pdfPath: string): number {
 
 // ─── DOI Input Modal ────────────────────────────────────────
 
-class DoiInputModal extends Modal {
-  private resolve: (doi: string | null) => void;
+class DoiInputModal extends PromiseModal<string | null> {
+  protected cancelledValue(): string | null {
+    return null;
+  }
 
-  constructor(app: import("obsidian").App, resolve: (doi: string | null) => void) {
-    super(app);
-    this.resolve = resolve;
+  /** Open the modal and resolve with the entered identifier, or null. */
+  askForIdentifier(): Promise<string | null> {
+    return this.openAndWait();
   }
 
   onOpen(): void {
@@ -3206,9 +3138,7 @@ class DoiInputModal extends Modal {
           logNotice("Please enter a DOI.");
           return;
         }
-        this.resolve(doi);
-        this.resolve = () => {};
-        this.close();
+        this.settle(doi);
       });
     new ButtonComponent(footer)
       .setButtonText("Cancel")
@@ -3219,20 +3149,11 @@ class DoiInputModal extends Modal {
       if (e.key === "Enter") {
         e.preventDefault();
         const doi = input.value.trim();
-        if (doi) {
-          this.resolve(doi);
-          this.resolve = () => {};
-          this.close();
-        }
+        if (doi) this.settle(doi);
       }
     });
 
     window.setTimeout(() => input.focus(), 50);
-  }
-
-  onClose(): void {
-    this.resolve(null);
-    this.contentEl.empty();
   }
 }
 

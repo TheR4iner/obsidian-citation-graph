@@ -1,5 +1,6 @@
 import { normalizePath, type DataAdapter } from "obsidian";
 import type { S2Paper, S2CacheData, S2CacheEntry } from "../types";
+import { asNumber, asRecord, parseJson, pick } from "./json";
 
 const CACHE_FILE = "s2-cache.json";
 const TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
@@ -12,11 +13,7 @@ const TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
  * the prototype of every object in the plugin.
  */
 function nullProtoRecord<T>(source?: Record<string, T>): Record<string, T> {
-	const out = Object.create(null) as Record<string, T>;
-	if (source) {
-		for (const key of Object.keys(source)) out[key] = source[key];
-	}
-	return out;
+	return Object.assign(Object.create(null) as Record<string, T>, source);
 }
 
 function emptyCache(): S2CacheData {
@@ -48,16 +45,22 @@ export class S2RefCache {
 	async load(): Promise<void> {
 		try {
 			const raw = await this.adapter.read(this.filePath);
-			const parsed = JSON.parse(raw);
-			if (parsed?.version === 1 && parsed.entries) {
+			const parsed = parseJson(raw);
+			if (asNumber(pick(parsed, "version")) === 1 && pick(parsed, "entries")) {
 				// Rehydrate into null-prototype maps: JSON.parse produces plain
 				// objects, which would reintroduce the inherited-key problem
 				// described on nullProtoRecord.
 				this.cache = {
 					version: 1,
-					entries: nullProtoRecord(parsed.entries),
+					entries: nullProtoRecord(
+						asRecord(pick(parsed, "entries")) as Record<string, S2CacheEntry>
+					),
 					// Older cache files may lack the index entirely.
-					externalIdIndex: nullProtoRecord(parsed.externalIdIndex),
+					externalIdIndex: nullProtoRecord(
+						asRecord(pick(parsed, "externalIdIndex")) as
+							| Record<string, string>
+							| undefined
+					),
 				};
 			}
 		} catch {

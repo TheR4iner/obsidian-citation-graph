@@ -1,5 +1,6 @@
 import { requestUrl } from "obsidian";
 import type { ZoteroCollection, ZoteroItem } from "../types";
+import { asRecord, asString, parseJson, pick } from "./json";
 import * as http from "http";
 
 const LOCAL_BASE = "/api";
@@ -12,8 +13,12 @@ const MAX_LOCAL_RESPONSE_BYTES = 64 * 1024 * 1024;
 /**
  * Make a GET request to Zotero's local HTTP server using Node's http module.
  * Obsidian's requestUrl can be unreliable with http://localhost in Electron.
+ *
+ * The body comes back as `unknown`. Each caller asserts the shape it expects,
+ * which is a claim about Zotero's API that this function is in no position to
+ * check; making that assertion visible at the call site is the point.
  */
-function localGet(path: string): Promise<any> {
+function localGet(path: string): Promise<unknown> {
   return new Promise((resolve, reject) => {
     const req = http.get(
       { hostname: "127.0.0.1", port: LOCAL_PORT, path, headers: { Accept: "application/json" } },
@@ -42,7 +47,9 @@ function localGet(path: string): Promise<any> {
             reject(new Error(`Zotero response for ${path} was unexpectedly large; aborted.`));
           }
         });
-        res.on("error", (err) => reject(err));
+        res.on("error", (err: unknown) =>
+          reject(err instanceof Error ? err : new Error(String(err)))
+        );
         res.on("end", () => {
           if (truncated) return;
           try {
@@ -95,11 +102,13 @@ export class ZoteroClient {
 
   /** Fetch all collections from local Zotero instance, including group libraries */
   async getCollections(): Promise<ZoteroCollection[]> {
-    const userCollections: ZoteroCollection[] = await localGet(`${LOCAL_BASE}/users/0/collections`);
+    const userCollections = (await localGet(
+      `${LOCAL_BASE}/users/0/collections`
+    )) as ZoteroCollection[];
 
     let groups: Array<{ id: number; data: { name: string } }> = [];
     try {
-      groups = await localGet(`${LOCAL_BASE}/users/0/groups`);
+      groups = (await localGet(`${LOCAL_BASE}/users/0/groups`)) as typeof groups;
     } catch {
       // Groups endpoint unavailable -- return only personal library
     }
@@ -107,7 +116,9 @@ export class ZoteroClient {
     const groupCollectionArrays = await Promise.all(
       groups.map(async (g) => {
         try {
-          const cols: ZoteroCollection[] = await localGet(`${LOCAL_BASE}/groups/${encodeURIComponent(String(g.id))}/collections`);
+          const cols = (await localGet(
+            `${LOCAL_BASE}/groups/${encodeURIComponent(String(g.id))}/collections`
+          )) as ZoteroCollection[];
           return cols.map((c) => ({
             ...c,
             data: { ...c.data, groupId: g.id, groupName: g.data.name },
@@ -133,9 +144,9 @@ export class ZoteroClient {
     const limit = 100;
 
     while (true) {
-      const batch: ZoteroItem[] = await localGet(
+      const batch = (await localGet(
         `${LOCAL_BASE}/users/0/items/top?start=${start}&limit=${limit}`
-      );
+      )) as ZoteroItem[];
       items.push(...batch);
 
       if (batch.length < limit) break;
@@ -159,9 +170,9 @@ export class ZoteroClient {
     const limit = 100;
 
     while (true) {
-      const batch: ZoteroItem[] = await localGet(
+      const batch = (await localGet(
         `${LOCAL_BASE}/${owner}/collections/${key}/items?start=${start}&limit=${limit}`
-      );
+      )) as ZoteroItem[];
       items.push(...batch);
 
       if (batch.length < limit) break;
@@ -200,12 +211,14 @@ export class ZoteroClient {
       body: JSON.stringify([{ name }]),
     });
 
-    const data = JSON.parse(resp.text);
-    const successKeys = Object.values(data.successful || {}) as Array<{ key: string }>;
-    if (successKeys.length === 0) {
+    // Zotero answers with { successful: { "0": { ...the new collection } } }.
+    const successful = asRecord(pick(parseJson(resp.text), "successful"));
+    const created = successful ? Object.values(successful)[0] : undefined;
+    const identifier = asString(pick(created, "key"));
+    if (!identifier) {
       throw new Error("Failed to create Zotero collection");
     }
-    return successKeys[0].key;
+    return identifier;
   }
 
   /** Add items to Zotero via the Web API */

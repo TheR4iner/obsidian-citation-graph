@@ -1,13 +1,14 @@
 import { requestUrl } from "obsidian";
 import type { S2Paper } from "../types";
+import { asNumber, asRecord, asRecordArray, asString, pick } from "./json";
+import { RateLimiter } from "./rate-limit";
 
 const BASE = "https://api.crossref.org";
 
 /** Rate-limited CrossRef API client (references only, no public citation API) */
 export class CrossRefClient {
-  private lastRequestTime = 0;
   /** 200ms between requests */
-  private readonly minInterval = 200;
+  private readonly limiter = new RateLimiter(200);
 
   constructor(private email: string = "") {}
 
@@ -16,26 +17,16 @@ export class CrossRefClient {
     this.email = email;
   }
 
-  private async rateLimitedRequest<T>(fn: () => Promise<T>): Promise<T> {
-    const now = Date.now();
-    const elapsed = now - this.lastRequestTime;
-    if (elapsed < this.minInterval) {
-      await sleep(this.minInterval - elapsed);
-    }
-    this.lastRequestTime = Date.now();
-    return fn();
-  }
-
   /**
    * Get references (works cited BY this paper) from CrossRef metadata.
    * Only returns entries where the publisher deposited a DOI for the reference.
    */
   async getReferencesForDoi(doi: string): Promise<S2Paper[]> {
     const message = await this.fetchWork(doi);
-    if (!message?.reference) return [];
-    return message.reference
-      .filter((ref: any) => ref.DOI)
-      .map((ref: any) => mapCrossRefToS2Paper(ref));
+    if (!message) return [];
+    return asRecordArray(message.reference)
+      .filter((ref) => asString(ref.DOI) !== null)
+      .map((ref) => mapCrossRefToS2Paper(ref));
   }
 
   /**
@@ -48,13 +39,13 @@ export class CrossRefClient {
     return mapCrossRefWorkToS2Paper(message, doi);
   }
 
-  private async fetchWork(doi: string): Promise<any | null> {
-    return this.rateLimitedRequest(async () => {
+  private async fetchWork(doi: string): Promise<Record<string, unknown> | null> {
+    return this.limiter.run(async () => {
       try {
         let url = `${BASE}/works/${encodeURIComponent(doi)}`;
         if (this.email) url += `?mailto=${encodeURIComponent(this.email)}`;
         const response = await requestUrl({ url });
-        return response.json?.message || null;
+        return asRecord(pick(response.json, "message"));
       } catch {
         return null;
       }
@@ -62,28 +53,41 @@ export class CrossRefClient {
   }
 }
 
+/**
+ * The first year CrossRef gives for a work.
+ *
+ * The date lives under whichever of four keys the publisher deposited, each
+ * holding `date-parts: [[year, month, day]]`, so all four are tried in the
+ * order that puts the publication date ahead of the online-first one.
+ */
+function crossRefYear(work: Record<string, unknown>): number | null {
+  for (const key of ["issued", "published", "published-print", "published-online"]) {
+    const year = asNumber(pick(work, key, "date-parts", "0", "0"));
+    if (year !== null) return year;
+  }
+  return null;
+}
+
 /** Convert a CrossRef work record (top-level paper) to S2Paper format */
-function mapCrossRefWorkToS2Paper(work: any, doi: string): S2Paper {
-  const titleArr = work.title;
-  const title = Array.isArray(titleArr) ? titleArr[0] : titleArr || "";
+function mapCrossRefWorkToS2Paper(work: Record<string, unknown>, doi: string): S2Paper {
+  // CrossRef gives a title as a list, one entry per title variant.
+  const title =
+    asString(pick(work, "title", "0")) ?? asString(work.title) ?? "";
 
-  const dateParts =
-    work.issued?.["date-parts"]?.[0] ||
-    work.published?.["date-parts"]?.[0] ||
-    work["published-print"]?.["date-parts"]?.[0] ||
-    work["published-online"]?.["date-parts"]?.[0];
-  const year = dateParts && dateParts[0] ? parseInt(dateParts[0], 10) : null;
+  const authors = asRecordArray(work.author)
+    .map((author) => ({
+      name:
+        [asString(author.given), asString(author.family)]
+          .filter((part): part is string => part !== null)
+          .join(" ")
+          .trim() ||
+        asString(author.name) ||
+        "",
+    }))
+    .filter((author) => author.name !== "");
 
-  const authors = Array.isArray(work.author)
-    ? work.author.map((a: any) => ({
-        name: [a.given, a.family].filter(Boolean).join(" ").trim() ||
-          a.name ||
-          "",
-      })).filter((a: { name: string }) => a.name)
-    : [];
-
-  // CrossRef abstract is sometimes JATS XML; strip tags for plain text
-  const rawAbstract: string | undefined = work.abstract;
+  // CrossRef abstracts are sometimes JATS XML; strip tags for plain text.
+  const rawAbstract = asString(work.abstract);
   const abstract = rawAbstract
     ? rawAbstract.replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim() || null
     : null;
@@ -91,36 +95,32 @@ function mapCrossRefWorkToS2Paper(work: any, doi: string): S2Paper {
   return {
     paperId: `doi:${doi.toLowerCase()}`,
     externalIds: { DOI: doi },
-    title: title || "",
-    year: year && !isNaN(year) ? year : null,
+    title,
+    year: crossRefYear(work),
     authors,
     abstract,
-    citationCount: work["is-referenced-by-count"] ?? null,
+    citationCount: asNumber(work["is-referenced-by-count"]),
   };
 }
 
 /** Convert a CrossRef reference entry to S2Paper format */
-function mapCrossRefToS2Paper(ref: any): S2Paper {
-  const doi = ref.DOI;
+function mapCrossRefToS2Paper(ref: Record<string, unknown>): S2Paper {
+  const doi = asString(ref.DOI) ?? "";
   // CrossRef reference entries have limited metadata
   const title =
-    ref["article-title"] || ref["volume-title"] || ref.unstructured || "";
-  const year = ref.year ? parseInt(ref.year, 10) : null;
-  const author = ref.author
-    ? [{ name: ref.author }]
-    : [];
+    asString(ref["article-title"]) ??
+    asString(ref["volume-title"]) ??
+    asString(ref.unstructured) ??
+    "";
+  const author = asString(ref.author);
 
   return {
     paperId: `doi:${doi.toLowerCase()}`,
     externalIds: { DOI: doi },
     title,
-    year: year && !isNaN(year) ? year : null,
-    authors: author,
+    year: asNumber(ref.year),
+    authors: author ? [{ name: author }] : [],
     abstract: null,
     citationCount: null,
   };
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => window.setTimeout(resolve, ms));
 }

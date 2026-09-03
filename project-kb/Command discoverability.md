@@ -2,7 +2,7 @@
 
 ## Overview
 
-The plugin now registers sixteen commands, which is enough that the command palette became hard to scan. This note records what Obsidian actually offers for organising commands and what the plugin does about it.
+The plugin now registers eighteen commands, which is enough that the command palette became hard to scan. This note records what Obsidian actually offers for organising commands and what the plugin does about it.
 
 ## What Obsidian offers
 
@@ -18,7 +18,7 @@ Three levers exist instead:
 
 All three levers, applied together.
 
-**Availability gating.** The thirteen commands that need a canvas are registered through `canvasCommand()`, a wrapper returning a `checkCallback` that reports the command unavailable whenever `findActiveCanvas()` finds nothing. The gate deliberately reuses the very lookup the commands themselves perform, so a command is offered exactly when it would find a canvas to act on: any other predicate would drift. Only *Create from collection*, *Create from tag* and *Clear Semantic Scholar cache* are always available.
+**Availability gating.** The fifteen commands that need a canvas are registered through `canvasCommand()`, a wrapper returning a `checkCallback` that reports the command unavailable whenever `findActiveCanvas()` finds nothing. The gate deliberately reuses the very lookup the commands themselves perform, so a command is offered exactly when it would find a canvas to act on: any other predicate would drift. Only *Create from collection*, *Create from tag* and *Clear Semantic Scholar cache* are always available.
 
 Gating does not remove a command from Settings, Hotkeys, and an assigned hotkey still exists; it simply does nothing while no canvas is open. The `logNotice("Open a citation graph canvas first...")` guards inside the commands were kept, since the context menu and any future caller can still reach them.
 
@@ -36,9 +36,13 @@ While wiring this up, seven byte-identical copies of the "active file, else any 
 ## Open questions
 
 - `findActiveCanvas()` accepts a canvas open in any leaf, not only the active one, so the gate keeps the commands visible while a canvas sits in a background tab. That matches what the commands then do, but it means the palette does not shorten in a workspace that always has a canvas open somewhere.
-- The prefixes fight Obsidian's own style guide, which asks for plain sentence-case command names. Accepted deliberately: sixteen ungrouped commands were worse.
+- The prefixes fight Obsidian's own style guide, which asks for plain sentence-case command names. Accepted deliberately: eighteen ungrouped commands were worse. `eslint-plugin-obsidianmd` reports each prefixed name as a sentence-case warning; those warnings are expected and are not to be "fixed".
 
 ## History
+
+### 2026-09-01
+
+`onload` no longer holds eighteen `addCommand` blocks. `registerCommands()` carries two tables, `canvasCommands` and `anywhereCommands`, and loops over each; the split is what enforces the gate, since a row added to the canvas table cannot forget its `checkCallback`. Every command ID and display name was preserved exactly, so hotkeys are untouched. Registration order changed (canvas commands now register before the three always-available ones), which Obsidian does not use for anything: the palette sorts by name and recency.
 
 ### 2026-08-27
 

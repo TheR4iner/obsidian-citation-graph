@@ -13,11 +13,13 @@ The problem it solves: Semantic Scholar files a preprint and the journal article
 1. `paper.arxiv`, normalised through `normalizeArxiv` from `recommend.ts`.
 2. An arXiv-minted DOI (`10.48550/arXiv.X`). No network.
 3. OpenAlex's record of where the DOI is hosted: `OpenAlexClient.getLocationUrlsForDoi` selects `locations,best_oa_location` and returns every `landing_page_url` and `pdf_url`, which `arxivIdFromUrl` scans for `arxiv.org/abs/` or `arxiv.org/pdf/`. This is the route that usually works.
-4. `ArxivMetadataClient.searchByTitle`, confirmed with `titlesMatch`.
+4. `ArxivMetadataClient.searchByTitle`, confirmed with `titlesIdentical`.
 
 **arXiv's API has no DOI field.** Its supported search prefixes are `ti`, `au`, `abs`, `co`, `jr`, `cat`, `rn`, `id` and `all`. That is why route 3 exists at all: OpenAlex is the only cheap way from a publisher DOI to an arXiv ID.
 
-**A title search must be confirmed, never trusted.** arXiv ranks by relevance and happily returns near misses; accepting one downloads a different paper and files it under this note. `titlesMatch` compares on letters and digits alone (the three sources disagree about hyphens, case and trailing punctuation) and requires the *whole* title, so a prefix is rejected.
+**A title search must be confirmed, never trusted.** arXiv ranks by relevance and happily returns near misses; accepting one downloads a different paper and files it under this note. `titlesIdentical` compares on letters and digits alone (the three sources disagree about hyphens, case and trailing punctuation) and requires the *whole* title, so a prefix is rejected.
+
+**`titlesIdentical` is not `titlesMatch` from `recommend.ts`, and the two must never be merged.** Until the 2026-09-01 audit both were called `titlesMatch`, which invites exactly that mistake. The recommendation one scores token overlap and accepts anything at or above 0.7; it drops stopwords, so "Attention Is All You Need" and "Attention Is All You Need II" score a full 1.0 and would be accepted as the same paper at any threshold. Here that means downloading the wrong PDF and filing it under this note, which is the failure this route exists to prevent.
 
 **Query building.** `searchByTitle` strips everything but letters, digits and spaces before quoting the phrase, because a colon or bracket in a title makes arXiv reject the query outright, and caps it at the first 20 words.
 

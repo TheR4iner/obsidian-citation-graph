@@ -31,6 +31,18 @@ The scanner runs the first of `build`, `build:plugin` or `compile` it finds in `
 - A full-vault scan per paper in `findExistingNote`: indexed once per manager.
 - Timers through `window.setTimeout`, a hardcoded `.obsidian` path removed, `builtin-modules` replaced with `node:module`'s own, control-character regexes annotated as deliberate.
 
+## The first scan, 2026-09-01
+
+The scan reported no errors. What it did report, and what was done:
+
+**Behaviours** (declared on the listing, not defects):
+
+- *Direct Filesystem Access* and *Shell Execution*: both unavoidable, both now confined to one module apiece and disclosed in the README. See [[Filesystem and process constraints]]. The environment allow-list for the Claude CLI was the one finding with a real leak behind it.
+- *Vault Enumeration* (a Recommendation): kept, since neither the note index nor canvas discovery has a narrower API.
+- *Vault Read* and *Vault Write*: pass.
+
+**Source code**: about seven hundred `no-unsafe-*` warnings, all tracing to three `any` boundaries. Fixed to zero locally. See [[Typing the untyped boundaries]].
+
 ## Deliberately not done
 
 - **Sentence case on proper nouns.** The linter wants "arxiv", "Pdfs", "Semantic scholar", "Openalex", "Sk-...". The submission requirements explicitly ask for correct capitalisation of acronyms, proper nouns and trademarks, so the requirement wins and those warnings stay.

@@ -149,6 +149,6 @@ export function makeNote(note: Partial<FakeNote> = {}): {
 		file: vault.file("papers/Paper.md"),
 		fm: () => vault.notes.get("papers/Paper.md")!.fm,
 		body: () => vault.notes.get("papers/Paper.md")!.body,
-		freezeCache: vault.freezeCache,
+		freezeCache: () => vault.freezeCache(),
 	};
 }
