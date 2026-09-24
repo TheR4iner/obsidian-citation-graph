@@ -6,6 +6,10 @@ Each released version here is also the body of the matching [GitHub release](htt
 
 ## [Unreleased]
 
+### Fixed
+
+- Adding a paper by DOI or arXiv ID, expanding a paper, and resolving missing edges no longer look frozen while Semantic Scholar is rate limiting. Semantic Scholar sometimes refuses requests for a while, and the plugin waits and retries for up to about a minute before giving up. During that wait these commands showed nothing, so a lookup that was about to succeed looked like one that had failed silently, and running it again only queued a second lookup behind the first. They now keep a notice up with an elapsed-time clock and say when they are waiting out a rate limit, and every such wait is written to the log file.
+
 ## [0.6.0] - 2026-09-03
 
 ### Changed

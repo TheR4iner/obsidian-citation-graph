@@ -12,6 +12,8 @@ const BASE = "https://api.semanticscholar.org/graph/v1";
  */
 const RETRY_DELAYS_MS = [5000, 15000, 45000];
 
+export type RateLimitListener = (seconds: number, context: string) => void;
+
 /** Thrown when Semantic Scholar is still refusing after every retry. */
 export class S2RateLimitError extends Error {
   constructor(context: string) {
@@ -40,10 +42,12 @@ export class SemanticScholarClient {
   private lastRequestTime = 0;
 
   /**
-   * Called before each backoff wait, so a long-running command can tell the
-   * user why it has stalled instead of appearing to hang.
+   * Told before each backoff wait, so a command can tell the user why it has
+   * stalled instead of appearing to hang. A set rather than one slot: two
+   * commands can share the request chain, and the second must not unhook the
+   * first's listener when it finishes.
    */
-  onRateLimitWait: ((seconds: number, context: string) => void) | null = null;
+  private rateLimitListeners = new Set<RateLimitListener>();
 
   constructor(private apiKey: string = "") {}
 
@@ -57,6 +61,12 @@ export class SemanticScholarClient {
    */
   setApiKey(apiKey: string): void {
     this.apiKey = apiKey;
+  }
+
+  /** Subscribe to backoff waits; returns the unsubscribe function. */
+  onRateLimitWait(listener: RateLimitListener): () => void {
+    this.rateLimitListeners.add(listener);
+    return () => this.rateLimitListeners.delete(listener);
   }
 
   /**
@@ -108,7 +118,7 @@ export class SemanticScholarClient {
         console.warn(
           `Citation Graph: S2 rate limited while ${context}; retrying in ${delay / 1000}s`
         );
-        this.onRateLimitWait?.(delay / 1000, context);
+        for (const listener of this.rateLimitListeners) listener(delay / 1000, context);
         await sleep(delay);
       }
     }
