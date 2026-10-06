@@ -40,7 +40,7 @@ import { OpenAlexClient } from "./api/openalex";
 import { CrossRefClient } from "./api/crossref";
 import { ArxivMetadataClient } from "./api/arxiv-metadata";
 import { resolvePaperWithRefs } from "./api/multi-source";
-import { findArxivId } from "./api/arxiv-lookup";
+import { findArxivId, parsePaperIdentifier } from "./api/arxiv-lookup";
 import { asNumber, asRecord, asString, asStringArray } from "./api/json";
 import { fetchRefsAndCitations } from "./api/multi-source";
 import { CollectionPickerModal } from "./modals/collection-picker";
@@ -1052,24 +1052,8 @@ export default class CitationGraphPlugin extends Plugin {
       if (!rawInput) return;
 
       // 3. Parse input: DOI URL, arxiv DOI, arxiv ID, or plain DOI
-      let s2Query: string;
-      let doi: string | null = null;
-      let arxiv: string | null = null;
-      let input = rawInput.replace(/^https?:\/\/doi\.org\//i, "").replace(/^https?:\/\/arxiv\.org\/abs\//i, "").trim();
-
-      // arxiv-minted DOIs (10.48550/arXiv.XXXX.XXXXX) → use arxiv ID
-      const arxivDoiMatch = input.match(/^10\.48550\/arXiv\.(.+)$/i);
-      if (arxivDoiMatch) {
-        arxiv = arxivDoiMatch[1];
-        s2Query = `ARXIV:${arxiv}`;
-      } else if (/^\d{4}\.\d{4,5}(v\d+)?$/.test(input) || /^[a-z-]+\/\d{7}(v\d+)?$/.test(input)) {
-        // Raw arxiv ID
-        arxiv = input;
-        s2Query = `ARXIV:${input}`;
-      } else {
-        doi = input;
-        s2Query = `DOI:${input}`;
-      }
+      const { doi, arxiv } = parsePaperIdentifier(rawInput);
+      const s2Query = arxiv ? `ARXIV:${arxiv}` : `DOI:${doi}`;
 
       logOnly(`Looking up ${s2Query}...`);
       const progress = new ProgressNotice(`Looking up ${s2Query}`);
