@@ -1,5 +1,7 @@
 /// <reference types="node" />
-import { App, PluginSettingTab, Setting, AbstractInputSuggest, TFolder, TFile, Modal, Notice } from "obsidian";
+import { App, PluginSettingTab, Setting, TFile, Modal, Notice } from "obsidian";
+import type { SettingDefinitionItem } from "obsidian";
+import { FolderSuggest } from "./folder-suggest";
 import { parseCanvasData } from "./canvas/parse";
 import type CitationGraphPlugin from "./main";
 import type { BannedPaper, CitationGraphSettings, DisplayStatus, StatusColor } from "./types";
@@ -69,47 +71,27 @@ function envHint(settingValue: string, envVar: string): string {
   return process.env[envVar] ? ` (from env: ${envVar})` : "";
 }
 
-/** Autocomplete suggest for vault folder paths */
-class FolderSuggest extends AbstractInputSuggest<TFolder> {
-  constructor(app: App, private inputEl: HTMLInputElement) {
-    super(app, inputEl);
-  }
+/**
+ * One row of the settings tab: what it is called, what it says, and how its
+ * control is built onto the row Obsidian creates for it.
+ */
+interface SettingRow {
+  name: string;
+  desc?: string;
+  /** False keeps a row that only exists to show a message out of search. */
+  searchable?: boolean;
+  build(setting: Setting): void;
+}
 
-  getSuggestions(query: string): TFolder[] {
-    const lowerQuery = query.toLowerCase();
-    const folders: TFolder[] = [];
-
-    const walk = (folder: TFolder) => {
-      if (folder.path.toLowerCase().includes(lowerQuery) || folder.path === "/") {
-        folders.push(folder);
-      }
-      for (const child of folder.children) {
-        if (child instanceof TFolder) walk(child);
-      }
-    };
-
-    const root = this.app.vault.getRoot();
-    walk(root);
-
-    // Filter out root itself, sort alphabetically
-    return folders
-      .filter((f) => f.path !== "/")
-      .sort((a, b) => a.path.localeCompare(b.path));
-  }
-
-  renderSuggestion(folder: TFolder, el: HTMLElement): void {
-    el.setText(folder.path);
-  }
-
-  selectSuggestion(folder: TFolder): void {
-    this.inputEl.value = folder.path;
-    this.inputEl.trigger("input");
-    this.close();
-  }
+interface SettingSection {
+  heading?: string;
+  rows: SettingRow[];
 }
 
 export class CitationGraphSettingTab extends PluginSettingTab {
   plugin: CitationGraphPlugin;
+  /** The row that lists statuses sharing a colour; rebuilt with the tab. */
+  private clashSetting: Setting | null = null;
 
   constructor(app: App, plugin: CitationGraphPlugin) {
     super(app, plugin);
@@ -117,32 +99,51 @@ export class CitationGraphSettingTab extends PluginSettingTab {
   }
 
   /**
+   * The whole tab, declared rather than drawn: Obsidian renders it and indexes
+   * every row for its settings search.
+   */
+  getSettingDefinitions(): SettingDefinitionItem[] {
+    return this.sections().map((section) => ({
+      type: "group" as const,
+      heading: section.heading,
+      items: section.rows.map((row) => ({
+        name: row.name,
+        desc: row.desc,
+        searchable: row.searchable,
+        render: (setting: Setting) => row.build(setting),
+      })),
+    }));
+  }
+
+  /**
    * A text field bound to one string setting, stored trimmed.
    *
-   * Every credential and path field was the same eleven lines with one
-   * property name changed, which is how a field ends up saving to the wrong
-   * setting after a copy-paste. `key` is checked against the settings type, so
-   * a wrong name is a compile error rather than a silently dead field.
+   * `key` is checked against the settings type, so a wrong name is a compile
+   * error rather than a silently dead field.
    */
-  private textSetting(
+  private textRow(
     key: PlainStringKey,
-    opts: { name: string; desc: string; placeholder: string; password?: boolean }
-  ): void {
-    new Setting(this.containerEl)
-      .setName(opts.name)
-      .setDesc(opts.desc)
-      .addText((text) => {
-        // Credentials are read aloud in screenshots and screen shares far
-        // more often than they are typed.
-        if (opts.password) text.inputEl.type = "password";
-        text
-          .setPlaceholder(opts.placeholder)
-          .setValue(this.plugin.settings[key])
-          .onChange(async (value) => {
-            this.plugin.settings[key] = value.trim();
-            await this.plugin.saveSettings();
-          });
-      });
+    opts: { name: string; desc: string; placeholder: string; password?: boolean; folder?: boolean }
+  ): SettingRow {
+    return {
+      name: opts.name,
+      desc: opts.desc,
+      build: (setting) => {
+        setting.addText((text) => {
+          // Credentials are read aloud in screenshots and screen shares far
+          // more often than they are typed.
+          if (opts.password) text.inputEl.type = "password";
+          if (opts.folder) new FolderSuggest(this.app, text.inputEl);
+          text
+            .setPlaceholder(opts.placeholder)
+            .setValue(this.plugin.settings[key])
+            .onChange(async (value) => {
+              this.plugin.settings[key] = value.trim();
+              await this.plugin.saveSettings();
+            });
+        });
+      },
+    };
   }
 
   /**
@@ -152,38 +153,44 @@ export class CitationGraphSettingTab extends PluginSettingTab {
    * user is usually mid-typing, and writing a partial number would apply a
    * value they never chose.
    */
-  private numberSetting(
+  private numberRow(
     key: NumberSettingKey,
     opts: { name: string; desc: string; placeholder: string; min: number; max?: number }
-  ): void {
-    new Setting(this.containerEl)
-      .setName(opts.name)
-      .setDesc(opts.desc)
-      .addText((text) =>
-        text
-          .setPlaceholder(opts.placeholder)
-          .setValue(String(this.plugin.settings[key]))
-          .onChange(async (value) => {
-            const n = parseInt(value, 10);
-            if (isNaN(n) || n < opts.min) return;
-            if (opts.max !== undefined && n > opts.max) return;
-            this.plugin.settings[key] = n;
-            await this.plugin.saveSettings();
-          })
-      );
+  ): SettingRow {
+    return {
+      name: opts.name,
+      desc: opts.desc,
+      build: (setting) => {
+        setting.addText((text) =>
+          text
+            .setPlaceholder(opts.placeholder)
+            .setValue(String(this.plugin.settings[key]))
+            .onChange(async (value) => {
+              const n = parseInt(value, 10);
+              if (isNaN(n) || n < opts.min) return;
+              if (opts.max !== undefined && n > opts.max) return;
+              this.plugin.settings[key] = n;
+              await this.plugin.saveSettings();
+            })
+        );
+      },
+    };
   }
 
   /** A switch bound to one boolean setting. */
-  private toggleSetting(key: BooleanSettingKey, opts: { name: string; desc: string }): void {
-    new Setting(this.containerEl)
-      .setName(opts.name)
-      .setDesc(opts.desc)
-      .addToggle((toggle) =>
-        toggle.setValue(this.plugin.settings[key]).onChange(async (value) => {
-          this.plugin.settings[key] = value;
-          await this.plugin.saveSettings();
-        })
-      );
+  private toggleRow(key: BooleanSettingKey, opts: { name: string; desc: string }): SettingRow {
+    return {
+      name: opts.name,
+      desc: opts.desc,
+      build: (setting) => {
+        setting.addToggle((toggle) =>
+          toggle.setValue(this.plugin.settings[key]).onChange(async (value) => {
+            this.plugin.settings[key] = value;
+            await this.plugin.saveSettings();
+          })
+        );
+      },
+    };
   }
 
   /**
@@ -192,379 +199,397 @@ export class CitationGraphSettingTab extends PluginSettingTab {
    * Deliberately not trimmed: leading and trailing blank lines are part of a
    * prompt the user wrote.
    */
-  private promptSetting(key: PlainStringKey, opts: { name: string; desc: string }): void {
-    new Setting(this.containerEl)
-      .setName(opts.name)
-      .setDesc(opts.desc)
-      .addTextArea((text) => {
-        text
-          .setPlaceholder("Leave blank to use the built-in default prompt.")
-          .setValue(this.plugin.settings[key])
-          .onChange(async (value) => {
-            this.plugin.settings[key] = value;
-            await this.plugin.saveSettings();
-          });
-        text.inputEl.rows = 8;
-        text.inputEl.addClass("citation-graph-prompt-input");
-      });
+  private promptRow(key: PlainStringKey, opts: { name: string; desc: string }): SettingRow {
+    return {
+      name: opts.name,
+      desc: opts.desc,
+      build: (setting) => {
+        setting.addTextArea((text) => {
+          text
+            .setPlaceholder("Leave blank to use the built-in default prompt.")
+            .setValue(this.plugin.settings[key])
+            .onChange(async (value) => {
+              this.plugin.settings[key] = value;
+              await this.plugin.saveSettings();
+            });
+          text.inputEl.rows = 8;
+          text.inputEl.addClass("citation-graph-prompt-input");
+        });
+      },
+    };
   }
 
-  display(): void {
-    const { containerEl } = this;
-    containerEl.empty();
+  /** A dropdown plus hex field for one reading status's canvas colour. */
+  private statusColorRow({ key, status, desc }: (typeof STATUS_COLOR_SETTINGS)[number]): SettingRow {
+    return {
+      name: STATUS_LABELS[status],
+      desc,
+      build: (setting) => {
+        const stored = parseStatusColor(this.plugin.settings[key]);
+        // Remembered so toggling away from Custom and back does not lose the hex.
+        let hex = isCustomColor(stored) ? stored : CUSTOM_COLOR_FALLBACK;
 
+        let hexEl: HTMLElement | null = null;
+        const showHexField = (visible: boolean) => {
+          if (hexEl) hexEl.toggleClass("citation-graph-hidden", !visible);
+        };
 
-    // --- Folders ---
-    new Setting(containerEl)
-      .setName("Collections folder")
-      .setDesc("Root folder for collections. Each Zotero collection gets its own subdirectory containing both the canvas and literature notes. Leave empty to use the vault root.")
-      .addText((text) => {
-        new FolderSuggest(this.app, text.inputEl);
-        text
-          .setPlaceholder("Collections (empty = vault root)")
-          .setValue(this.plugin.settings.collectionsFolder)
-          .onChange(async (value) => {
-            // An empty value is meaningful: it means the vault root. Only the
-            // separator characters are stripped, so "/" and "" agree.
-            this.plugin.settings.collectionsFolder = value.trim().replace(/^\/+|\/+$/g, "");
-            await this.plugin.saveSettings();
-          });
-      });
+        setting.addDropdown((dropdown) => {
+          for (const { value, label } of CANVAS_COLORS) {
+            dropdown.addOption(value, label);
+          }
+          dropdown.addOption(CUSTOM_COLOR, "Custom hex...");
+          dropdown
+            .setValue(isCustomColor(stored) ? CUSTOM_COLOR : stored)
+            .onChange(async (value) => {
+              const custom = value === CUSTOM_COLOR;
+              this.plugin.settings[key] = custom ? hex : (value as StatusColor);
+              showHexField(custom);
+              await this.plugin.saveSettings();
+              this.refreshClashWarning();
+            });
+        });
 
-    // --- Zotero ---
-    new Setting(containerEl).setName("Zotero").setHeading();
+        setting.addText((text) => {
+          hexEl = text.inputEl;
+          text.inputEl.addClass("citation-graph-hex-input");
+          text.inputEl.setAttribute("spellcheck", "false");
+          text
+            .setPlaceholder("#rrggbb")
+            .setValue(isCustomColor(stored) ? stored : "")
+            .onChange(async (value) => {
+              const parsed = parseStatusColor(value);
+              // Only persist a complete, valid hex: the user is mid-typing
+              // otherwise, and a partial value would blank the canvas color.
+              const valid = isCustomColor(parsed);
+              text.inputEl.toggleClass("is-invalid", value.trim() !== "" && !valid);
+              if (!valid) return;
+              hex = parsed;
+              text.inputEl.setCssProps({ "--cg-swatch": parsed });
+              this.plugin.settings[key] = parsed;
+              await this.plugin.saveSettings();
+              this.refreshClashWarning();
+            });
+          if (isCustomColor(stored)) text.inputEl.setCssProps({ "--cg-swatch": stored });
+        });
 
-    this.textSetting("zoteroApiKey", {
-      name: "Zotero API key",
-      desc:
-        "Required for syncing papers to Zotero. Get one at zotero.org → Settings → Security → Applications" +
-        envHint(this.plugin.settings.zoteroApiKey, "ZOTERO_API_KEY"),
-      placeholder: "Enter API key",
-      password: true,
-    });
-
-    this.textSetting("zoteroUserId", {
-      name: "Zotero user ID",
-      desc: "Numeric user ID shown at zotero.org → Settings → Security → Applications",
-      placeholder: "12345678",
-    });
-
-    // --- Semantic Scholar ---
-    new Setting(containerEl).setName("Semantic Scholar").setHeading();
-
-    this.textSetting("semanticScholarApiKey", {
-      name: "API key (optional)",
-      desc:
-        "For higher rate limits (1000 req/min vs 100 req/5min). Get one at semanticscholar.org/product/api#api-key-form" +
-        envHint(this.plugin.settings.semanticScholarApiKey, "SEMANTIC_SCHOLAR_API_KEY"),
-      placeholder: "Optional API key",
-      password: true,
-    });
-
-    new Setting(containerEl)
-      .setName("Reference cache")
-      .setDesc(`${this.plugin.s2Cache.size} papers cached. Cached references are reused when expanding papers.`)
-      .addButton((btn) =>
-        btn.setButtonText("Clear cache").onClick(async () => {
-          this.plugin.s2Cache.clear();
-          await this.plugin.s2Cache.save();
-          this.display(); // refresh to update count
-          new (await import("obsidian")).Notice("Citation cache cleared.");
-        })
-      );
-
-    // --- Supplementary Citation Sources ---
-    new Setting(containerEl).setName("Supplementary citation sources").setHeading();
-
-    containerEl.createEl("p", {
-      text: "Query additional databases when expanding papers to find references that Semantic Scholar may miss.",
-      cls: "setting-item-description",
-    });
-
-    this.toggleSetting("enableOpenAlex", {
-      name: "OpenAlex",
-      desc: "Free academic database with broad citation coverage",
-    });
-
-    this.toggleSetting("enableCrossRef", {
-      name: "CrossRef",
-      desc: "Publisher metadata (references only, when deposited by publishers)",
-    });
-
-    this.textSetting("openAlexEmail", {
-      name: "Email for polite access",
-      desc: "Providing an email gives better rate limits on OpenAlex and CrossRef (recommended)",
-      placeholder: "you@example.com",
-    });
-
-    // --- Canvas ---
-    new Setting(containerEl).setName("Canvas").setHeading();
-
-    this.numberSetting("nodeWidth", {
-      name: "Node width",
-      desc: "Width of paper nodes on canvas (pixels)",
-      placeholder: "300",
-      min: 1,
-    });
-
-    this.numberSetting("nodeHeight", {
-      name: "Node height",
-      desc: "Height of paper nodes on canvas (pixels)",
-      placeholder: "200",
-      min: 1,
-    });
-
-    // --- Reading status colors ---
-    new Setting(containerEl).setName("Reading status colors").setHeading();
-    containerEl.createEl("p", {
-      text:
-        "Canvas node color for each reading status. Colors are reapplied whenever the " +
-        "canvas is built, expanded, or a status changes.",
-      cls: "setting-item-description",
-    });
-
-    // Status is read back off the node's colour, so two statuses sharing one
-    // colour are genuinely indistinguishable on the canvas. Say so rather
-    // than letting it look like a bug.
-    const clashWarning = containerEl.createEl("p", {
-      cls: "setting-item-description citation-graph-settings-warning",
-    });
-    const refreshClashWarning = () => {
-      const used = new Map<string, string[]>();
-      for (const { key, status } of STATUS_COLOR_SETTINGS) {
-        const colour = parseStatusColor(this.plugin.settings[key]);
-        if (!colour) continue;
-        used.set(colour, [...(used.get(colour) ?? []), STATUS_LABELS[status]]);
-      }
-      const clashes = [...used.values()].filter((names) => names.length > 1);
-      clashWarning.setText(
-        clashes.length === 0
-          ? ""
-          : clashes
-              .map((names) => `${names.join(" and ")} share a color, so only their labels tell them apart.`)
-              .join(" ")
-      );
+        showHexField(isCustomColor(stored));
+      },
     };
+  }
 
-    for (const { key, status, desc } of STATUS_COLOR_SETTINGS) {
-      const stored = parseStatusColor(this.plugin.settings[key]);
-      // Remembered so toggling away from Custom and back does not lose the hex.
-      let hex = isCustomColor(stored) ? stored : CUSTOM_COLOR_FALLBACK;
-
-      const setting = new Setting(containerEl)
-        .setName(STATUS_LABELS[status])
-        .setDesc(desc);
-
-      let hexEl: HTMLElement | null = null;
-      const showHexField = (visible: boolean) => {
-        if (hexEl) hexEl.toggleClass("citation-graph-hidden", !visible);
-      };
-
-      setting.addDropdown((dropdown) => {
-        for (const { value, label } of CANVAS_COLORS) {
-          dropdown.addOption(value, label);
-        }
-        dropdown.addOption(CUSTOM_COLOR, "Custom hex...");
-        dropdown
-          .setValue(isCustomColor(stored) ? CUSTOM_COLOR : stored)
-          .onChange(async (value) => {
-            const custom = value === CUSTOM_COLOR;
-            this.plugin.settings[key] = custom ? hex : (value as StatusColor);
-            showHexField(custom);
-            await this.plugin.saveSettings();
-            refreshClashWarning();
-          });
-      });
-
-      setting.addText((text) => {
-        hexEl = text.inputEl;
-        text.inputEl.addClass("citation-graph-hex-input");
-        text.inputEl.setAttribute("spellcheck", "false");
-        text
-          .setPlaceholder("#rrggbb")
-          .setValue(isCustomColor(stored) ? stored : "")
-          .onChange(async (value) => {
-            const parsed = parseStatusColor(value);
-            // Only persist a complete, valid hex: the user is mid-typing
-            // otherwise, and a partial value would blank the canvas color.
-            const valid = isCustomColor(parsed);
-            text.inputEl.toggleClass("is-invalid", value.trim() !== "" && !valid);
-            if (!valid) return;
-            hex = parsed;
-            text.inputEl.setCssProps({ "--cg-swatch": parsed });
-            this.plugin.settings[key] = parsed;
-            await this.plugin.saveSettings();
-            refreshClashWarning();
-          });
-        if (isCustomColor(stored)) text.inputEl.setCssProps({ "--cg-swatch": stored });
-      });
-
-      showHexField(isCustomColor(stored));
+  /**
+   * Say which statuses share a colour, or hide the row when none do.
+   *
+   * Updated in place rather than by re-rendering the tab, which would take
+   * focus away from a hex field the user is typing into.
+   */
+  private refreshClashWarning(): void {
+    if (!this.clashSetting) return;
+    const used = new Map<string, string[]>();
+    for (const { key, status } of STATUS_COLOR_SETTINGS) {
+      const colour = parseStatusColor(this.plugin.settings[key]);
+      if (!colour) continue;
+      used.set(colour, [...(used.get(colour) ?? []), STATUS_LABELS[status]]);
     }
+    const text = [...used.values()]
+      .filter((names) => names.length > 1)
+      .map((names) => `${names.join(" and ")} share a color, so only their labels tell them apart.`)
+      .join(" ");
+    this.clashSetting.setDesc(text);
+    this.clashSetting.settingEl.toggleClass("citation-graph-hidden", text === "");
+  }
 
-    refreshClashWarning();
-
-    // --- LLM / Summarization ---
-    new Setting(containerEl).setName("Summaries").setHeading();
-
+  private sections(): SettingSection[] {
+    const settings = this.plugin.settings;
     const providerLabels: Record<string, string> = {
       "claude-cli": "Claude CLI (local)",
       anthropic: "Anthropic API",
       openai: "OpenAI API",
       google: "Google Gemini API",
     };
+    const defaultModel = defaultModelForProvider(settings.llmProvider);
 
-    new Setting(containerEl)
-      .setName("Provider")
-      .setDesc("Which LLM service to use for paper summaries")
-      .addDropdown((dropdown) => {
-        for (const [value, label] of Object.entries(providerLabels)) {
-          dropdown.addOption(value, label);
-        }
-        dropdown
-          .setValue(this.plugin.settings.llmProvider)
-          .onChange(async (value) => {
-            this.plugin.settings.llmProvider = value as typeof this.plugin.settings.llmProvider;
-            await this.plugin.saveSettings();
-            this.display();
-          });
-      });
-
-    if (this.plugin.settings.llmProvider === "claude-cli") {
-      this.textSetting("claudeCliPath", {
-        name: "Claude CLI path",
-        desc:
-          "Leave blank to auto-detect: the plugin will first check ~/.local/bin/claude " +
-          "(the official installer's location), then fall back to 'claude' on Obsidian's PATH. " +
-          "Set an absolute path here only if auto-detection fails or you want to override it.",
-        placeholder: "claude",
-      });
-    }
-
-    if (this.plugin.settings.llmProvider !== "claude-cli") {
-      this.textSetting("llmApiKey", {
-        name: "API key",
-        desc:
-          `API key for ${providerLabels[this.plugin.settings.llmProvider] ?? "the selected provider"}` +
-          envHint(
-            this.plugin.settings.llmApiKey,
-            LLM_PROVIDER_ENV_VAR[this.plugin.settings.llmProvider] ?? ""
-          ),
-        placeholder: "sk-...",
-        password: true,
-      });
-    }
-
-    // Shown for every provider, Claude CLI included: the CLI takes a --model
-    // flag too, and hiding the field there while still reading the value would
-    // silently carry a stale model name over from a previously selected
-    // provider.
-    const defaultModel = defaultModelForProvider(this.plugin.settings.llmProvider);
-    this.textSetting("llmModel", {
-      name: "Model",
-      desc: `Model name (leave empty for default: ${defaultModel})`,
-      placeholder: defaultModel,
-    });
-
-    this.numberSetting("llmMaxOutputTokens", {
-      name: "Max output tokens",
-      desc: "Maximum tokens per summary response (controls length and cost)",
-      placeholder: "1024",
-      min: 1,
-    });
-
-    this.numberSetting("llmBatchTokenBudget", {
-      name: "Batch token budget",
-      desc: "Stop batch summarization after this many total tokens (0 = unlimited). Not tracked with Claude CLI.",
-      placeholder: "0",
-      min: 0,
-    });
-
-    this.promptSetting("summaryPrompt", {
-      name: "Summary prompt",
-      desc:
-        "Custom prompt for the Write Summary command. Leave blank to use the built-in default. " +
-        "Supports placeholders: {title}, {authors}, {year}. The PDF is attached automatically.",
-    });
-
-    // --- Recommendations ---
-    new Setting(containerEl).setName("Recommendations").setHeading();
-
-    this.numberSetting("recommendCount", {
-      name: "Papers to suggest",
-      desc:
-        "How many papers the Recommend papers command asks for per run (1 to 50). " +
-        "Each suggestion costs one Semantic Scholar request to verify, so a large number means a long wait.",
-      placeholder: "10",
-      min: 1,
-      max: 50,
-    });
-
-    this.toggleSetting("recommendWebSearch", {
-      name: "Search the web",
-      desc:
-        "Let the model search the web while recommending, instead of relying on its training data alone. " +
-        "Supported by the Anthropic API, Google Gemini and the Claude CLI; the OpenAI endpoint this plugin uses has no search tool. " +
-        "Searching costs extra input tokens.",
-    });
-
-    this.numberSetting("recommendMaxOutputTokens", {
-      name: "Max output tokens",
-      desc:
-        "Maximum tokens per recommendation response. A list of ten papers with reasons needs more room than a summary, " +
-        "and a truncated reply cannot be read back.",
-      placeholder: "4096",
-      min: 1,
-    });
-
-    this.promptSetting("recommendPrompt", {
-      name: "Recommendation prompt",
-      desc:
-        "Standing instructions for the Recommend papers command. Leave blank to use the built-in default, " +
-        "and note that the command's own prompt box overrides this for a single run. " +
-        "The canvas paper list and the required JSON reply format are always appended, so a custom prompt cannot break the answer.",
-    });
-
-    // --- Download ---
-    new Setting(containerEl).setName("Download").setHeading();
-
-    this.textSetting("defaultDownloadPath", {
-      name: "Default download path",
-      desc: "Fallback filesystem path to look for paper PDFs (used by Write Summary if the canvas download path has no match)",
-      placeholder: "/home/user/papers",
-    });
-
-    // --- Banned Papers ---
-    new Setting(containerEl).setName("Banned papers").setHeading();
-
-    new Setting(containerEl)
-      .setName("Manage banned papers")
-      .setDesc("Review and remove papers marked as uninteresting from a specific canvas")
-      .addButton((btn) =>
-        btn.setButtonText("Open manager").onClick(async () => {
-          // Find all citation graph canvases
-          const canvasFiles = this.app.vault
-            .getFiles()
-            .filter((f) => f.extension === "canvas");
-
-          const cgCanvases: TFile[] = [];
-          for (const file of canvasFiles) {
-            try {
-              const data = await readCanvasMeta(this.app, file);
-              if (data.citationGraphMeta) cgCanvases.push(file);
-            } catch {
-              // A canvas that is not readable JSON is simply not one of ours.
+    return [
+      {
+        rows: [
+          {
+            name: "Collections folder",
+            desc: "Root folder for collections. Each Zotero collection gets its own subdirectory containing both the canvas and literature notes. Leave empty to use the vault root.",
+            build: (setting) => {
+              setting.addText((text) => {
+                new FolderSuggest(this.app, text.inputEl);
+                text
+                  .setPlaceholder("Collections (empty = vault root)")
+                  .setValue(settings.collectionsFolder)
+                  .onChange(async (value) => {
+                    // An empty value is meaningful: it means the vault root. Only the
+                    // separator characters are stripped, so "/" and "" agree.
+                    settings.collectionsFolder = value.trim().replace(/^\/+|\/+$/g, "");
+                    await this.plugin.saveSettings();
+                  });
+              });
+            },
+          },
+        ],
+      },
+      {
+        heading: "Zotero",
+        rows: [
+          this.textRow("zoteroApiKey", {
+            name: "Zotero API key",
+            desc:
+              "Required for syncing papers to Zotero. Get one at zotero.org → Settings → Security → Applications" +
+              envHint(settings.zoteroApiKey, "ZOTERO_API_KEY"),
+            placeholder: "Enter API key",
+            password: true,
+          }),
+          this.textRow("zoteroUserId", {
+            name: "Zotero user ID",
+            desc: "Numeric user ID shown at zotero.org → Settings → Security → Applications",
+            placeholder: "12345678",
+          }),
+        ],
+      },
+      {
+        heading: "Semantic Scholar",
+        rows: [
+          this.textRow("semanticScholarApiKey", {
+            name: "API key (optional)",
+            desc:
+              "For higher rate limits (1000 req/min vs 100 req/5min). Get one at semanticscholar.org/product/api#api-key-form" +
+              envHint(settings.semanticScholarApiKey, "SEMANTIC_SCHOLAR_API_KEY"),
+            placeholder: "Optional API key",
+            password: true,
+          }),
+          {
+            name: "Reference cache",
+            desc: `${this.plugin.s2Cache.size} papers cached. Cached references are reused when expanding papers.`,
+            build: (setting) => {
+              setting.addButton((btn) =>
+                btn.setButtonText("Clear cache").onClick(async () => {
+                  this.plugin.s2Cache.clear();
+                  await this.plugin.s2Cache.save();
+                  this.update(); // update the count
+                  new Notice("Citation cache cleared.");
+                })
+              );
+            },
+          },
+        ],
+      },
+      {
+        heading: "Supplementary citation sources",
+        rows: [
+          this.toggleRow("enableOpenAlex", {
+            name: "OpenAlex",
+            desc: "Also query OpenAlex, a free academic database with broad citation coverage, when expanding papers, to find references Semantic Scholar may miss",
+          }),
+          this.toggleRow("enableCrossRef", {
+            name: "CrossRef",
+            desc: "Also query CrossRef's publisher metadata when expanding papers (references only, when deposited by publishers)",
+          }),
+          this.textRow("openAlexEmail", {
+            name: "Email for polite access",
+            desc: "Providing an email gives better rate limits on OpenAlex and CrossRef (recommended)",
+            placeholder: "you@example.com",
+          }),
+        ],
+      },
+      {
+        heading: "Canvas",
+        rows: [
+          this.numberRow("nodeWidth", {
+            name: "Node width",
+            desc: "Width of paper nodes on canvas (pixels)",
+            placeholder: "300",
+            min: 1,
+          }),
+          this.numberRow("nodeHeight", {
+            name: "Node height",
+            desc: "Height of paper nodes on canvas (pixels)",
+            placeholder: "200",
+            min: 1,
+          }),
+        ],
+      },
+      {
+        heading: "Reading status colors",
+        rows: [
+          ...STATUS_COLOR_SETTINGS.map((entry, i) => {
+            const row = this.statusColorRow(entry);
+            // Said once, on the first row, instead of in a loose paragraph.
+            if (i === 0) {
+              row.desc = `${row.desc}. Colors are reapplied whenever the canvas is built, expanded, or a status changes`;
             }
-          }
+            return row;
+          }),
+          {
+            // Status is read back off the node's colour, so two statuses
+            // sharing one colour are genuinely indistinguishable on the canvas.
+            // Say so rather than letting it look like a bug.
+            name: "Shared colors",
+            searchable: false,
+            build: (setting) => {
+              setting.settingEl.addClass("citation-graph-settings-warning");
+              this.clashSetting = setting;
+              this.refreshClashWarning();
+            },
+          },
+        ],
+      },
+      {
+        heading: "Summaries",
+        rows: [
+          {
+            name: "Provider",
+            desc: "Which LLM service to use for paper summaries",
+            build: (setting) => {
+              setting.addDropdown((dropdown) => {
+                for (const [value, label] of Object.entries(providerLabels)) {
+                  dropdown.addOption(value, label);
+                }
+                dropdown.setValue(settings.llmProvider).onChange(async (value) => {
+                  settings.llmProvider = value as typeof settings.llmProvider;
+                  await this.plugin.saveSettings();
+                  this.update();
+                });
+              });
+            },
+          },
+          settings.llmProvider === "claude-cli"
+            ? this.textRow("claudeCliPath", {
+                name: "Claude CLI path",
+                desc:
+                  "Leave blank to auto-detect: the plugin will first check ~/.local/bin/claude " +
+                  "(the official installer's location), then fall back to 'claude' on Obsidian's PATH. " +
+                  "Set an absolute path here only if auto-detection fails or you want to override it.",
+                placeholder: "claude",
+              })
+            : this.textRow("llmApiKey", {
+                name: "API key",
+                desc:
+                  `API key for ${providerLabels[settings.llmProvider] ?? "the selected provider"}` +
+                  envHint(settings.llmApiKey, LLM_PROVIDER_ENV_VAR[settings.llmProvider] ?? ""),
+                placeholder: "sk-...",
+                password: true,
+              }),
+          // Shown for every provider, Claude CLI included: the CLI takes a
+          // --model flag too, and hiding the field there while still reading
+          // the value would silently carry a stale model name over from a
+          // previously selected provider.
+          this.textRow("llmModel", {
+            name: "Model",
+            desc: `Model name (leave empty for default: ${defaultModel})`,
+            placeholder: defaultModel,
+          }),
+          this.numberRow("llmMaxOutputTokens", {
+            name: "Max output tokens",
+            desc: "Maximum tokens per summary response (controls length and cost)",
+            placeholder: "1024",
+            min: 1,
+          }),
+          this.numberRow("llmBatchTokenBudget", {
+            name: "Batch token budget",
+            desc: "Stop batch summarization after this many total tokens (0 = unlimited). Not tracked with Claude CLI.",
+            placeholder: "0",
+            min: 0,
+          }),
+          this.promptRow("summaryPrompt", {
+            name: "Summary prompt",
+            desc:
+              "Custom prompt for the Write Summary command. Leave blank to use the built-in default. " +
+              "Supports placeholders: {title}, {authors}, {year}. The PDF is attached automatically.",
+          }),
+        ],
+      },
+      {
+        heading: "Recommendations",
+        rows: [
+          this.numberRow("recommendCount", {
+            name: "Papers to suggest",
+            desc:
+              "How many papers the Recommend papers command asks for per run (1 to 50). " +
+              "Each suggestion costs one Semantic Scholar request to verify, so a large number means a long wait.",
+            placeholder: "10",
+            min: 1,
+            max: 50,
+          }),
+          this.toggleRow("recommendWebSearch", {
+            name: "Search the web",
+            desc:
+              "Let the model search the web while recommending, instead of relying on its training data alone. " +
+              "Supported by the Anthropic API, Google Gemini and the Claude CLI; the OpenAI endpoint this plugin uses has no search tool. " +
+              "Searching costs extra input tokens.",
+          }),
+          this.numberRow("recommendMaxOutputTokens", {
+            name: "Max output tokens",
+            desc:
+              "Maximum tokens per recommendation response. A list of ten papers with reasons needs more room than a summary, " +
+              "and a truncated reply cannot be read back.",
+            placeholder: "4096",
+            min: 1,
+          }),
+          this.promptRow("recommendPrompt", {
+            name: "Recommendation prompt",
+            desc:
+              "Standing instructions for the Recommend papers command. Leave blank to use the built-in default, " +
+              "and note that the command's own prompt box overrides this for a single run. " +
+              "The canvas paper list and the required JSON reply format are always appended, so a custom prompt cannot break the answer.",
+          }),
+        ],
+      },
+      {
+        heading: "Download",
+        rows: [
+          this.textRow("defaultDownloadPath", {
+            name: "Default download folder",
+            desc:
+              "Vault folder where Write Summary looks for paper PDFs when the canvas's own download folder has no match, " +
+              "and where it downloads missing ones. PDFs are kept in the vault so the plugin only touches vault files. " +
+              "If the vault is a git repository and you do not want PDFs committed, add this folder to its .gitignore.",
+            placeholder: "Papers/PDFs",
+            folder: true,
+          }),
+        ],
+      },
+      {
+        heading: "Banned papers",
+        rows: [
+          {
+            name: "Manage banned papers",
+            desc: "Review and remove papers marked as uninteresting from a specific canvas",
+            build: (setting) => {
+              setting.addButton((btn) =>
+                btn.setButtonText("Open manager").onClick(() => void this.openBannedPapersManager())
+              );
+            },
+          },
+        ],
+      },
+    ];
+  }
 
-          if (cgCanvases.length === 0) {
-            new Notice("No citation graph canvases found.");
-            return;
-          }
+  private async openBannedPapersManager(): Promise<void> {
+    // Find all citation graph canvases
+    const canvasFiles = this.app.vault.getFiles().filter((f) => f.extension === "canvas");
 
-          new BannedPapersManagerModal(this.app, cgCanvases).open();
-        })
-      );
+    const cgCanvases: TFile[] = [];
+    for (const file of canvasFiles) {
+      try {
+        const data = await readCanvasMeta(this.app, file);
+        if (data.citationGraphMeta) cgCanvases.push(file);
+      } catch {
+        // A canvas that is not readable JSON is simply not one of ours.
+      }
+    }
+
+    if (cgCanvases.length === 0) {
+      new Notice("No citation graph canvases found.");
+      return;
+    }
+
+    new BannedPapersManagerModal(this.app, cgCanvases).open();
   }
 }
 

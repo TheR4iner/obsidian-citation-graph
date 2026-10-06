@@ -90,3 +90,11 @@ export class ButtonComponent {
 export const requestUrl = (): never => {
 	throw new Error("requestUrl is not available under the obsidian test stub");
 };
+
+/** Constructed by the download picker, which no test opens. */
+export class AbstractInputSuggest {
+	constructor(_app: unknown, _inputEl: unknown) {}
+}
+
+export const arrayBufferToBase64 = (buffer: ArrayBuffer): string =>
+	Buffer.from(buffer).toString("base64");
