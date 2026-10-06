@@ -1,3 +1,4 @@
+/// <reference types="node" />
 import { ButtonComponent } from "obsidian";
 import { logNotice } from "../log";
 import type { App } from "obsidian";

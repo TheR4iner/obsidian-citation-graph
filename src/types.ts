@@ -1,3 +1,4 @@
+/// <reference types="node" />
 /** A banned (uninteresting) paper, stored per-canvas */
 export interface BannedPaper {
 	id: string;
