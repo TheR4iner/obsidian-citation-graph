@@ -6,6 +6,8 @@ Each released version here is also the body of the matching [GitHub release](htt
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-10-07
+
 ### Changed
 
 - PDFs are now kept in a folder inside your vault, and the plugin reads and writes only vault files. *Download* saves to a vault folder (created if it does not exist, with your folders suggested as you type), and *Write summary* reads PDFs back from it. A download folder you set in an earlier version keeps working if it is inside the vault, even when written as an absolute or `~` path. One outside the vault is refused with a message saying what to do: choose a vault folder in the download dialog or in *Default download folder*, and move the PDFs you already have into it. If you do not want the PDFs committed to git or synced, add the folder to your `.gitignore` or to Obsidian Sync's excluded folders; the README shows how.
@@ -141,7 +143,8 @@ First public release.
 - **Sync canvas to Zotero**, **Send papers to canvas**, **Relayout canvas**, **Delete paper**, and **Clear Semantic Scholar cache**.
 - Settings for the collections folder, the Zotero and Semantic Scholar API keys, node size, the five status colours, and the full LLM configuration.
 
-[Unreleased]: https://github.com/TheR4iner/obsidian-citation-graph/compare/0.6.2...HEAD
+[Unreleased]: https://github.com/TheR4iner/obsidian-citation-graph/compare/0.7.0...HEAD
+[0.7.0]: https://github.com/TheR4iner/obsidian-citation-graph/compare/0.6.2...0.7.0
 [0.6.2]: https://github.com/TheR4iner/obsidian-citation-graph/compare/0.6.1...0.6.2
 [0.6.1]: https://github.com/TheR4iner/obsidian-citation-graph/compare/0.6.0...0.6.1
 [0.6.0]: https://github.com/TheR4iner/obsidian-citation-graph/compare/0.5.0...0.6.0
