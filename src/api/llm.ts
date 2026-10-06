@@ -1,3 +1,4 @@
+/// <reference types="node" />
 import { requestUrl } from "obsidian";
 import * as child_process from "child_process";
 import * as fs from "fs";
