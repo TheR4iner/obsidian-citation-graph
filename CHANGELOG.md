@@ -6,6 +6,12 @@ Each released version here is also the body of the matching [GitHub release](htt
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-10-06
+
+### Fixed
+
+- No change in what the plugin does. Obsidian's community directory showed around three hundred code-quality warnings on this plugin's listing; they came from its automated review not finding the type definitions for Node.js, which the plugin uses to read and write PDFs and to talk to Zotero. The code now points to those definitions itself, so the review checks it as written and the warnings are gone.
+
 ## [0.6.1] - 2026-10-06
 
 ### Fixed
@@ -128,7 +134,8 @@ First public release.
 - **Sync canvas to Zotero**, **Send papers to canvas**, **Relayout canvas**, **Delete paper**, and **Clear Semantic Scholar cache**.
 - Settings for the collections folder, the Zotero and Semantic Scholar API keys, node size, the five status colours, and the full LLM configuration.
 
-[Unreleased]: https://github.com/TheR4iner/obsidian-citation-graph/compare/0.6.1...HEAD
+[Unreleased]: https://github.com/TheR4iner/obsidian-citation-graph/compare/0.6.2...HEAD
+[0.6.2]: https://github.com/TheR4iner/obsidian-citation-graph/compare/0.6.1...0.6.2
 [0.6.1]: https://github.com/TheR4iner/obsidian-citation-graph/compare/0.6.0...0.6.1
 [0.6.0]: https://github.com/TheR4iner/obsidian-citation-graph/compare/0.5.0...0.6.0
 [0.5.0]: https://github.com/TheR4iner/obsidian-citation-graph/compare/0.4.0...0.5.0
