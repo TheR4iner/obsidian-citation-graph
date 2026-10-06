@@ -1,7 +1,6 @@
 /// <reference types="node" />
-import { requestUrl } from "obsidian";
+import { arrayBufferToBase64, requestUrl } from "obsidian";
 import * as child_process from "child_process";
-import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import type { Paper, CitationGraphSettings, LlmResponse } from "../types";
@@ -42,21 +41,31 @@ const CLI_TIMEOUT_MS = 300000;
 const CLI_STDERR_KEEP_CHARS = 4000;
 
 /**
- * Read a PDF as base64, refusing anything past MAX_PDF_BYTES.
+ * A PDF to attach to a request.
  *
- * The path is expected to have been checked against the folders the user
- * configured for downloads before it gets here; `main.ts` is the only producer
- * and does that with `assertInsideFolders`.
+ * The HTTP providers need the bytes; the Claude CLI reads the file itself and
+ * needs its location on disk. Reading is deferred so the CLI never loads a
+ * file it only passes along.
  */
-function readPdfBase64(pdfPath: string): string {
-	const { size } = fs.statSync(pdfPath);
+export interface PdfAttachment {
+	/** File name, for error messages. */
+	name: string;
+	/** Absolute path on disk, handed to the Claude CLI. */
+	fullPath: string;
+	size(): Promise<number>;
+	read(): Promise<ArrayBuffer>;
+}
+
+/** Read a PDF as base64, refusing anything past MAX_PDF_BYTES. */
+async function pdfBase64(pdf: PdfAttachment): Promise<string> {
+	const size = await pdf.size();
 	if (size > MAX_PDF_BYTES) {
 		throw new Error(
 			`PDF is too large to summarize (${Math.round(size / 1024 / 1024)} MB; ` +
-			`limit ${MAX_PDF_BYTES / 1024 / 1024} MB): ${path.basename(pdfPath)}`,
+			`limit ${MAX_PDF_BYTES / 1024 / 1024} MB): ${pdf.name}`,
 		);
 	}
-	return fs.readFileSync(pdfPath).toString("base64");
+	return arrayBufferToBase64(await pdf.read());
 }
 
 /** One call to the configured provider. */
@@ -64,7 +73,7 @@ export interface LlmRequest {
 	/** The full user-visible prompt. */
 	prompt: string;
 	/** PDF to attach to the message, for tasks that read a paper. */
-	pdfPath?: string | null;
+	pdf?: PdfAttachment | null;
 	/**
 	 * Ask the provider to run its own web search tool. Silently ignored by
 	 * providers that have none -- call providerSupportsWebSearch() first if the
@@ -110,11 +119,11 @@ export async function callLlm(
  */
 export async function summarizePaper(
 	paper: Paper,
-	pdfPath: string,
+	pdf: PdfAttachment,
 	settings: CitationGraphSettings,
 ): Promise<LlmResponse> {
 	return callLlm(
-		{ prompt: buildSummaryPrompt(paper, settings.summaryPrompt), pdfPath },
+		{ prompt: buildSummaryPrompt(paper, settings.summaryPrompt), pdf },
 		settings,
 	);
 }
@@ -224,13 +233,13 @@ async function callAnthropic(
 	const model = effectiveModel(settings);
 
 	const content: Record<string, unknown>[] = [];
-	if (request.pdfPath) {
+	if (request.pdf) {
 		content.push({
 			type: "document",
 			source: {
 				type: "base64",
 				media_type: "application/pdf",
-				data: readPdfBase64(request.pdfPath),
+				data: await pdfBase64(request.pdf),
 			},
 		});
 	}
@@ -292,12 +301,12 @@ async function callOpenAI(
 	const model = effectiveModel(settings);
 
 	const content: Record<string, unknown>[] = [];
-	if (request.pdfPath) {
+	if (request.pdf) {
 		content.push({
 			type: "file",
 			file: {
 				filename: "paper.pdf",
-				file_data: `data:application/pdf;base64,${readPdfBase64(request.pdfPath)}`,
+				file_data: `data:application/pdf;base64,${await pdfBase64(request.pdf)}`,
 			},
 		});
 	}
@@ -353,11 +362,11 @@ async function callGoogle(
 	const model = effectiveModel(settings);
 
 	const parts: Record<string, unknown>[] = [];
-	if (request.pdfPath) {
+	if (request.pdf) {
 		parts.push({
 			inline_data: {
 				mime_type: "application/pdf",
-				data: readPdfBase64(request.pdfPath),
+				data: await pdfBase64(request.pdf),
 			},
 		});
 	}
@@ -487,49 +496,40 @@ export function isUsableCliPath(value: string): boolean {
 }
 
 /**
- * Pick which claude binary to invoke. Order of preference:
- *   1. The configured path (settings.claudeCliPath), if it is usable and the
- *      file is actually there.
- *   2. ~/.local/bin/claude -- the canonical path the official installer uses
- *      on Linux/macOS. Electron's inherited PATH typically excludes this dir,
- *      so we check it explicitly before falling back to PATH lookup.
- *   3. "claude" via PATH (may resolve to a system-wide install)
+ * Pick which claude binary to invoke: the configured path when one is set,
+ * otherwise the bare name `claude`, looked up through the child's PATH (see
+ * `cliSearchPath`).
  *
  * Throws rather than falling through when the configured path is unusable:
  * quietly running a different binary than the one named in the settings is
- * exactly the surprise this whole section exists to avoid.
+ * exactly the surprise this whole section exists to avoid. Whether the file
+ * exists is left to spawn, whose ENOENT is reported with the path it tried.
  */
 function resolveClaudeCliPath(settings: CitationGraphSettings): string {
 	const configured = settings.claudeCliPath?.trim();
-	if (configured) {
-		if (!isUsableCliPath(configured)) {
-			throw new Error(
-				`"Claude CLI path" is not a usable path to an executable: ${configured}`
-			);
-		}
-		if (path.isAbsolute(configured) && !isExecutableFile(configured)) {
-			throw new Error(`No file found at the configured Claude CLI path: ${configured}`);
-		}
-		return configured;
+	if (!configured) return "claude";
+	if (!isUsableCliPath(configured)) {
+		throw new Error(
+			`"Claude CLI path" is not a usable path to an executable: ${configured}`
+		);
 	}
-
-	try {
-		const userLocal = path.join(os.homedir(), ".local", "bin", "claude");
-		if (isExecutableFile(userLocal)) return userLocal;
-	} catch {
-		// os.homedir() can throw in unusual environments; fall through
-	}
-
-	return "claude";
+	return configured;
 }
 
-/** Whether a path names a file that exists (a directory is not runnable). */
-function isExecutableFile(target: string): boolean {
-	try {
-		return fs.statSync(target).isFile();
-	} catch {
-		return false;
-	}
+/**
+ * The PATH the CLI is started with: `~/.local/bin` first, then the inherited
+ * PATH. Exported for testing.
+ *
+ * `~/.local/bin` is where the official installer puts claude on Linux and
+ * macOS, and the PATH Obsidian inherits from a desktop launcher usually lacks
+ * it. spawn looks the command up through the PATH it is given, so putting the
+ * folder first finds that install before any system-wide one, as the plugin
+ * always has, without reading the filesystem itself.
+ */
+export function cliSearchPath(inherited: string | undefined, home: string): string {
+	const userBin = path.join(home, ".local", "bin");
+	const rest = (inherited ?? "").split(path.delimiter).filter((p) => p !== "" && p !== userBin);
+	return [userBin, ...rest].join(path.delimiter);
 }
 
 /**
@@ -595,7 +595,7 @@ function callClaudeCli(
 	// as another tool name, and the CLI then waits on stdin for a prompt that
 	// never comes.
 	args.push("--", request.prompt);
-	if (request.pdfPath) args.push(request.pdfPath);
+	if (request.pdf) args.push(request.pdf.fullPath);
 
 	return new Promise<LlmResponse>((resolve, reject) => {
 		const child = child_process.spawn(executable, args, {
@@ -605,7 +605,7 @@ function callClaudeCli(
 			// which contain arbitrary text from remote sources. Passed as an
 			// array to a shell-less spawn they are inert.
 			shell: false,
-			env: cliEnvironment(),
+			env: { ...cliEnvironment(), PATH: cliSearchPath(process.env.PATH, os.homedir()) },
 			windowsHide: true,
 		});
 

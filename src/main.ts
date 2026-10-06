@@ -48,7 +48,7 @@ import { CollectionPickerModal } from "./modals/collection-picker";
 import { TagPickerModal } from "./modals/tag-picker";
 import { ExpandPickerModal } from "./modals/expand-picker";
 import { DownloadPickerModal, downloadPapers, buildPaperFilename } from "./modals/download-picker";
-import { assertInsideFolders, fileInFolder, resolveFolder } from "./paper-files";
+import { estimatePdfPages, fileInFolder, vaultFolder } from "./paper-files";
 import { SendPickerModal } from "./modals/send-picker";
 import { RecommendPromptModal } from "./modals/recommend-prompt-modal";
 import { RecommendPickerModal } from "./modals/recommend-picker";
@@ -63,9 +63,9 @@ import { parseCanvasData } from "./canvas/parse";
 import { registerCanvasPaperMenu } from "./canvas/node-menu";
 import { hasPaperNode, resolvePaperNodeId, layoutPapers, layoutNewPapers } from "./canvas/layout";
 import { S2RefCache } from "./api/s2-cache";
-import * as fs from "fs";
 import * as path from "path";
 import { summarizePaper, effectiveModel, providerSupportsWebSearch } from "./api/llm";
+import type { PdfAttachment } from "./api/llm";
 import {
   isAlreadyOnCanvas,
   requestRecommendations,
@@ -209,12 +209,15 @@ export default class CitationGraphPlugin extends Plugin {
 
   async onload(): Promise<void> {
     await this.loadSettings();
-    this.addSettingTab(new CitationGraphSettingTab(this.app, this));
 
     initLog(this.app.vault.adapter, this.pluginDir);
 
     this.s2Cache = new S2RefCache(this.app.vault.adapter, this.pluginDir);
     await this.s2Cache.load();
+
+    // After the cache: Obsidian builds the tab's definitions as soon as it is
+    // added, to index them for search, and one row shows the cache's size.
+    this.addSettingTab(new CitationGraphSettingTab(this.app, this));
 
     this.s2Client = new SemanticScholarClient();
     this.s2Client.onRateLimitWait((seconds, context) =>
@@ -403,9 +406,21 @@ export default class CitationGraphPlugin extends Plugin {
    * filesystem, so callers report that rather than building a broken path.
    */
   private absolutePluginDir(): string | null {
+    const adapter = this.fileSystemAdapter();
+    return adapter ? path.join(adapter.getBasePath(), this.pluginDir) : null;
+  }
+
+  /**
+   * The vault's adapter when the vault lives on a local filesystem, else null.
+   *
+   * Downloads and summaries need it: a download fallback and the Claude CLI
+   * run outside Obsidian and are handed absolute paths, and a canvas or a
+   * setting from an earlier version may carry an absolute folder that has to
+   * be checked against the vault's location.
+   */
+  private fileSystemAdapter(): FileSystemAdapter | null {
     const adapter = this.app.vault.adapter;
-    if (!(adapter instanceof FileSystemAdapter)) return null;
-    return path.join(adapter.getBasePath(), this.pluginDir);
+    return adapter instanceof FileSystemAdapter ? adapter : null;
   }
 
   /**
@@ -1729,8 +1744,9 @@ export default class CitationGraphPlugin extends Plugin {
 
       // 5. Resolve the plugin's own directory, so a download fallback can
       //    locate any helper files bundled alongside the plugin.
+      const adapter = this.fileSystemAdapter();
       const pluginDir = this.absolutePluginDir();
-      if (!pluginDir) {
+      if (!adapter || !pluginDir) {
         logNotice(
           "Downloading needs a vault stored in the local filesystem."
         );
@@ -1748,14 +1764,23 @@ export default class CitationGraphPlugin extends Plugin {
 
       let downloadPath: string;
       let chosenPapers: Paper[];
-      if (modalPapers.length === 1 && knownPath) {
-        downloadPath = knownPath;
+      let knownFolder: string | null = null;
+      try {
+        knownFolder = knownPath ? vaultFolder(knownPath, adapter.getBasePath()) : null;
+      } catch (e) {
+        // A folder from before PDFs moved into the vault. The picker shows it
+        // and says what is wrong with it when the user tries to use it.
+        logOnly(`Stored download folder is not usable: ${e instanceof Error ? e.message : String(e)}`);
+      }
+      if (modalPapers.length === 1 && knownFolder !== null) {
+        downloadPath = knownFolder;
         chosenPapers = modalPapers;
       } else {
         const result = await new DownloadPickerModal(
           this.app,
           modalPapers,
-          knownPath
+          knownPath,
+          adapter.getBasePath(),
         ).pickPapers();
         if (!result) return;
         downloadPath = result.downloadPath;
@@ -1776,6 +1801,7 @@ export default class CitationGraphPlugin extends Plugin {
       const { downloaded, failed, resolvedArxiv } = await downloadPapers(
         chosenPapers,
         downloadPath,
+        adapter,
         pluginDir,
         {
           onProgress: (done, total, title) => {
@@ -2201,7 +2227,7 @@ export default class CitationGraphPlugin extends Plugin {
           const footer = contentEl.createDiv({ cls: "citation-graph-footer" });
           new ButtonComponent(footer)
             .setButtonText("Delete")
-            .setWarning()
+            .setDestructive()
             .onClick(() => { done(true); modal.close(); });
           new ButtonComponent(footer)
             .setButtonText("Cancel")
@@ -2866,15 +2892,24 @@ export default class CitationGraphPlugin extends Plugin {
     papers: Paper[],
     downloadPath: string,
   ): Promise<void> {
-    // 1. Resolve PDF paths for all papers.
-    //
-    //    These two folders are the whole of what this command may read. Every
-    //    path below is built inside one of them and checked against the pair
-    //    again before it is opened, so a filename derived from remote metadata
-    //    cannot reach a file the user never pointed the plugin at.
-    const searchFolders = [downloadPath, this.settings.defaultDownloadPath].filter(
-      (folder) => folder.trim() !== ""
-    );
+    const adapter = this.fileSystemAdapter();
+    if (!adapter) {
+      logNotice("Writing summaries needs a vault stored in the local filesystem.");
+      return;
+    }
+
+    // 1. Resolve PDF paths for all papers. Both folders are vault folders;
+    //    one stored by an earlier version may still name a folder outside the
+    //    vault, which is reported and skipped rather than read.
+    const searchFolders: string[] = [];
+    for (const raw of [downloadPath, this.settings.defaultDownloadPath]) {
+      if (raw.trim() === "") continue;
+      try {
+        searchFolders.push(vaultFolder(raw, adapter.getBasePath()));
+      } catch (e) {
+        logNotice(e instanceof Error ? e.message : String(e), 10000);
+      }
+    }
 
     const withPdf: { paper: Paper; pdfPath: string }[] = [];
     const missingPdf: Paper[] = [];
@@ -2884,8 +2919,8 @@ export default class CitationGraphPlugin extends Plugin {
       let pdfPath: string | null = null;
 
       for (const folder of searchFolders) {
-        const candidate = fileInFolder(resolveFolder(folder), pdfFilename);
-        if (fs.existsSync(candidate)) {
+        const candidate = fileInFolder(folder, pdfFilename);
+        if (await adapter.exists(candidate)) {
           pdfPath = candidate;
           break;
         }
@@ -2900,11 +2935,18 @@ export default class CitationGraphPlugin extends Plugin {
 
     // 2. Handle missing PDFs (batch modal)
     if (missingPdf.length > 0) {
-      const downloadDir = this.settings.defaultDownloadPath;
-      if (!downloadDir) {
+      let downloadDir: string | null = null;
+      try {
+        downloadDir = this.settings.defaultDownloadPath
+          ? vaultFolder(this.settings.defaultDownloadPath, adapter.getBasePath())
+          : null;
+      } catch {
+        // Already reported while building searchFolders.
+      }
+      if (downloadDir === null) {
         logNotice(
           `${missingPdf.length} paper${missingPdf.length > 1 ? "s" : ""} missing PDFs ` +
-          "and no default download path configured. Skipping those."
+          "and no usable default download folder configured. Skipping those."
         );
       } else {
         const choice = await askChoice<"download" | "skip" | null>(this.app, {
@@ -2930,6 +2972,7 @@ export default class CitationGraphPlugin extends Plugin {
           const { resolvedArxiv } = await downloadPapers(
             missingPdf,
             downloadDir,
+            adapter,
             pluginDir,
             {
               onProgress: (done, total, title) => {
@@ -2942,9 +2985,8 @@ export default class CitationGraphPlugin extends Plugin {
 
           // Re-resolve paths for the ones we tried to download
           for (const paper of missingPdf) {
-            const pdfFilename = buildPaperFilename(paper, ".pdf");
-            const candidate = fileInFolder(resolveFolder(downloadDir), pdfFilename);
-            if (fs.existsSync(candidate)) {
+            const candidate = fileInFolder(downloadDir, buildPaperFilename(paper, ".pdf"));
+            if (await adapter.exists(candidate)) {
               withPdf.push({ paper, pdfPath: candidate });
             }
           }
@@ -2958,32 +3000,24 @@ export default class CitationGraphPlugin extends Plugin {
       return;
     }
 
-    // 3. Estimate page counts and warn about long papers. The last check
-    //    before anything is opened: a path that is not inside one of the
-    //    folders named above never reaches the disk, and the paper is dropped
-    //    from the run with the reason in the log.
-    const resolved: { paper: Paper; pdfPath: string; pages: number }[] = [];
+    // 3. Estimate page counts and warn about long papers.
+    const resolved: { paper: Paper; pdf: PdfAttachment; pages: number }[] = [];
     const longPapers: { title: string; pages: number }[] = [];
 
     for (const { paper, pdfPath } of withPdf) {
-      try {
-        assertInsideFolders(pdfPath, searchFolders);
-      } catch (e) {
-        logOnly(
-          `Skipped "${paper.title}": ${e instanceof Error ? e.message : String(e)}`
-        );
-        continue;
-      }
-
+      const pdf = pdfAttachment(adapter, pdfPath);
       let pages = 0;
       try {
-        pages = estimatePdfPages(pdfPath);
+        const stat = await adapter.stat(pdfPath);
+        if (stat && stat.size <= MAX_PAGE_SCAN_BYTES) {
+          pages = estimatePdfPages(await adapter.readBinary(pdfPath));
+        }
       } catch (e) {
         // An unreadable PDF fails later with a clearer, per-paper message;
         // treat the page count as unknown rather than aborting the batch.
         console.warn(`Citation Graph: could not estimate pages for ${pdfPath}`, e);
       }
-      resolved.push({ paper, pdfPath, pages });
+      resolved.push({ paper, pdf, pages });
       if (pages > 10) {
         longPapers.push({ title: paper.title, pages });
       }
@@ -3042,7 +3076,7 @@ export default class CitationGraphPlugin extends Plugin {
         break;
       }
 
-      const { paper, pdfPath } = resolved[i];
+      const { paper, pdf } = resolved[i];
 
       // Check token budget before each call
       if (this.settings.llmBatchTokenBudget > 0 &&
@@ -3055,7 +3089,7 @@ export default class CitationGraphPlugin extends Plugin {
       logNotice(`Summarizing ${i + 1}/${resolved.length}: ${paper.title}`);
 
       try {
-        const result = await summarizePaper(paper, pdfPath, resolveApiKeys(this.settings));
+        const result = await summarizePaper(paper, pdf, resolveApiKeys(this.settings));
         totalTokens += result.inputTokens + result.outputTokens;
 
         if (!result.text) {
@@ -3109,17 +3143,20 @@ export default class CitationGraphPlugin extends Plugin {
 
 /**
  * Above this size, skip the page estimate entirely. The scan needs the whole
- * file in memory as a latin1 string on top of the Buffer it was read from --
+ * file in memory as a latin1 string on top of the bytes it was read from --
  * roughly 2x the file size in the renderer -- for a number that only decides
  * whether to show a "this paper is long" warning.
  */
 const MAX_PAGE_SCAN_BYTES = 64 * 1024 * 1024;
 
-/** Rough page count from the number of "/Type /Page" markers; 0 if unknown. */
-function estimatePdfPages(pdfPath: string): number {
-  if (fs.statSync(pdfPath).size > MAX_PAGE_SCAN_BYTES) return 0;
-  const matches = fs.readFileSync(pdfPath).toString("latin1").match(/\/Type\s*\/Page[^s]/g);
-  return matches ? matches.length : 0;
+/** A vault PDF in the form the LLM providers take it. */
+function pdfAttachment(adapter: FileSystemAdapter, vaultPath: string): PdfAttachment {
+  return {
+    name: path.posix.basename(vaultPath),
+    fullPath: adapter.getFullPath(vaultPath),
+    size: async () => (await adapter.stat(vaultPath))?.size ?? 0,
+    read: () => adapter.readBinary(vaultPath),
+  };
 }
 
 // ─── DOI Input Modal ────────────────────────────────────────

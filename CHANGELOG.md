@@ -6,6 +6,13 @@ Each released version here is also the body of the matching [GitHub release](htt
 
 ## [Unreleased]
 
+### Changed
+
+- PDFs are now kept in a folder inside your vault, and the plugin reads and writes only vault files. *Download* saves to a vault folder (created if it does not exist, with your folders suggested as you type), and *Write summary* reads PDFs back from it. A download folder you set in an earlier version keeps working if it is inside the vault, even when written as an absolute or `~` path. One outside the vault is refused with a message saying what to do: choose a vault folder in the download dialog or in *Default download folder*, and move the PDFs you already have into it. If you do not want the PDFs committed to git or synced, add the folder to your `.gitignore` or to Obsidian Sync's excluded folders; the README shows how.
+- Every Citation Graph setting now appears in Obsidian's settings search.
+- Citation Graph now needs Obsidian 1.13.0 or later. Older versions of Obsidian keep receiving 0.6.2.
+- The Claude CLI is now found by searching `~/.local/bin` first and then `PATH` when *Claude CLI path* is blank, as before, but a configured path is no longer checked for existence ahead of time. A path to a missing file is reported when *Write summary* or *Recommend papers* runs, with the path it tried.
+
 ## [0.6.2] - 2026-10-06
 
 ### Fixed

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   cliEnvironment,
+  cliSearchPath,
   describeCliEvent,
   defaultModelForProvider,
   effectiveModel,
@@ -158,6 +159,24 @@ describe("cliEnvironment", () => {
     expect(cliEnvironment({ PATH: undefined, HOME: "/home/someone" })).toEqual({
       HOME: "/home/someone",
     });
+  });
+});
+
+describe("cliSearchPath", () => {
+  const home = "/home/someone";
+  const userBin = "/home/someone/.local/bin";
+
+  // The official installer's location, which a desktop launcher's PATH lacks.
+  it("puts ~/.local/bin ahead of the inherited PATH", () => {
+    expect(cliSearchPath("/a/bin:/b/bin", home)).toBe(`${userBin}:/a/bin:/b/bin`);
+  });
+
+  it("does not list ~/.local/bin twice", () => {
+    expect(cliSearchPath(`/a/bin:${userBin}`, home)).toBe(`${userBin}:/a/bin`);
+  });
+
+  it("works with no inherited PATH", () => {
+    expect(cliSearchPath(undefined, home)).toBe(userBin);
   });
 });
 

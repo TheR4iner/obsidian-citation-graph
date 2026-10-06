@@ -43,10 +43,22 @@ The scan reported no errors. What it did report, and what was done:
 
 **Source code**: about seven hundred `no-unsafe-*` warnings, all tracing to three `any` boundaries. Fixed to zero locally. See [[Typing the untyped boundaries]].
 
+## The 0.6.2 scan, 2026-10-07
+
+The unsafe-any warnings were gone (see [[Typing the untyped boundaries]]). What remained, and what was done:
+
+- *Direct Filesystem Access*: removed by moving PDFs into the vault. See [[Filesystem and process constraints]].
+- *Shell Execution*: kept. The Claude CLI provider is a deliberate feature; the README says why and how to avoid it.
+- `prefer-setting-definitions`: done. The tab implements `getSettingDefinitions()` from one list of sections and rows; `minAppVersion` went to **1.13.0**, which also allowed `setWarning` to become `setDestructive`. A `display()` fallback was tried and dropped: the linter then flags `display` as deprecated, so keeping old-version support trades one warning for another. Obsidian keeps serving 0.6.2 to older apps through `versions.json`.
+- CSS `!important` (7) and `:has` (9): kept by user decision. `:has` is the only way a status cssclass on the note reaches the canvas node frame, and `!important` overrides Obsidian's canvas styles. Redrawing inside the node content was offered and declined.
+
+Gotcha found while testing: Obsidian 1.13+ calls `getSettingDefinitions()` inside `addSettingTab` to index search, so anything a row's description reads (here the reference cache size) must exist before `addSettingTab` runs. The plugin failed to load until `addSettingTab` moved after the cache load.
+
+How to test in a real Obsidian without touching the user's: build, copy `main.js`/`manifest.json`/`styles.css` into a scratch vault's `.obsidian/plugins/citation-graph/`, write `community-plugins.json`, put an `obsidian.json` listing the vault (`open: true`) and a copy of the app asar into `$XDG_CONFIG_HOME/obsidian/`, then run `XDG_CONFIG_HOME=<scratch> xvfb-run -a obsidian --remote-debugging-port=9333` and evaluate JS over CDP against the `app://obsidian.md` page. The trust-author dialog has to be clicked once. Settings open in a separate window in 1.14, and `app.setting.openTab(tab)` with the tab object from `pluginTabs` is what switches tabs.
+
 ## Deliberately not done
 
 - **Sentence case on proper nouns.** The linter wants "arxiv", "Pdfs", "Semantic scholar", "Openalex", "Sk-...". The submission requirements explicitly ask for correct capitalisation of acronyms, proper nouns and trademarks, so the requirement wins and those warnings stay.
-- **`prefer-setting-definitions`.** Adopting the declarative settings API would put the settings into Obsidian's settings search, but needs 1.13.0. A recommendation, not an error.
 - **`no-tfile-tfolder-cast` in `test/fakes.ts`.** The scanner ignores `test/`.
 - **typescript-eslint's `no-unsafe-*` rules**, which fire on every read of Obsidian's `frontmatter` (typed `any` upstream). Generic type strictness, not an Obsidian rule; this is why `npm run lint` is not wired into CI.
 
@@ -60,5 +72,7 @@ No telemetry, no ads, no self-install or dependency download, no obfuscation (th
 - Two things a reviewer may still ask about, both disclosed and both gated behind `isDesktopOnly`: the plugin spawns a user-configured `claude` binary, and it reads and writes PDFs at arbitrary paths outside the vault.
 
 ## History
+
+**2026-10-07 -- clearing the 0.6.2 scan.** Filesystem warning removed, settings search adopted with `minAppVersion` 1.13.0, CLI and CSS warnings kept by decision. Details in the section above.
 
 **2026-09-01 — audit against the real rules.** The first pass worked from memory of the old pull-request process and found six issues. Fetching the current policies and running the official linter found four more that mattered, two of them serious: `minAppVersion` was wrong in a way that stopped the plugin loading, and the injected stylesheet was a hard error rather than the grey area it had been judged to be. Ended at zero `obsidianmd/*` errors.
