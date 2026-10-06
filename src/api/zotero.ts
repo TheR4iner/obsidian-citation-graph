@@ -1,3 +1,4 @@
+/// <reference types="node" />
 import { requestUrl } from "obsidian";
 import type { ZoteroCollection, ZoteroItem } from "../types";
 import { asRecord, asString, parseJson, pick } from "./json";

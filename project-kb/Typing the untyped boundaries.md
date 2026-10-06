@@ -26,11 +26,18 @@ Elsewhere, `localGet` in `zotero.ts` returns `Promise<unknown>` and each caller 
 
 Result: 271 findings locally, then zero.
 
+## Node types in the scanner
+
+The 0.6.1 scan still reported about three hundred `no-unsafe-*` warnings, every one on a Node built-in: `fs`, `path`, `os`, `http`, `child_process`, `process`, `Buffer`. Obsidian's own API resolved fine there, so the scanner installs dev dependencies but does not load the ambient `@types/node` package (its TypeScript project evidently restricts `types`). Locally, `tsconfig.json` has no `types` field, so `@types/node` is loaded implicitly and lint is clean.
+
+Reproduced by linting `src` against a copy of `tsconfig.json` with `"types": []`: same files, same rules, same counts as the scan. Fixed with `/// <reference types="node" />` at the top of each non-test file that uses Node (`llm.ts`, `zotero.ts`, `main.ts`, `download-picker.ts`, `paper-files.ts`, `types.ts`, `settings.ts`). A triple-slash reference loads the types whatever the project's `types` setting, and it states a true fact: these files run on Node. Under the reproduction this left zero `no-unsafe-*` and zero `prefer-promise-reject-errors`. A new file that uses Node needs the same line, or the warnings return.
+
 ## Open questions
 
-- The scan reported far more findings than the same rules produce here, and reports them on Obsidian's own API calls (`.setName`, `.createDiv`, `new Notice`). The most likely explanation is that Obsidian's type declarations are not resolving in the scanner's environment, which makes every Obsidian value `any` there. Nothing in this repository can fix that, and they are warnings, so it was left. Worth re-checking if a future scan still shows hundreds.
 - `test/fakes.ts` keeps three `as TFile` casts flagged by `obsidianmd/no-tfile-tfolder-cast`. A fake file cannot satisfy `instanceof TFile`, and the scanner ignores `test/` anyway.
 
 ## History
+
+**2026-10-06 -- Node types reference.** The 0.6.1 scan's remaining unsafe-any warnings traced to `@types/node` not loading in the scanner; see "Node types in the scanner" above. This also settles the earlier open question: the 0.5.0 scan's warnings on Obsidian calls were the same kind of type-resolution gap, not code defects.
 
 **2026-09-01 — introduced**, working through the community directory's first scan. See [[Community plugin submission]]. The frontmatter extraction was the largest single win, and the six duplicated blocks it removed were worth removing on their own account.

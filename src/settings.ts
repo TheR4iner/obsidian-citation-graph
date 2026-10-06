@@ -1,3 +1,4 @@
+/// <reference types="node" />
 import { App, PluginSettingTab, Setting, AbstractInputSuggest, TFolder, TFile, Modal, Notice } from "obsidian";
 import { parseCanvasData } from "./canvas/parse";
 import type CitationGraphPlugin from "./main";
