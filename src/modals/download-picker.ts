@@ -1,13 +1,13 @@
 /// <reference types="node" />
-import { ButtonComponent } from "obsidian";
+import { ButtonComponent, TFile } from "obsidian";
 import { logNotice } from "../log";
-import type { App } from "obsidian";
+import type { App, FileSystemAdapter } from "obsidian";
 import type { Paper } from "../types";
-import * as fs from "fs";
 import * as path from "path";
 import * as https from "https";
 import { getDownloadFallback } from "../api/fallback-source";
-import { fileInFolder, resolveFolder, truncateToBytes } from "../paper-files";
+import { fileInFolder, truncateToBytes, vaultFolder } from "../paper-files";
+import { FolderSuggest } from "../folder-suggest";
 import { PromiseModal } from "./promise-modal";
 // Matches arxiv IDs: new format "2301.01234" or old format "quant-ph/0601075"
 const ARXIV_PATTERN = /^\d{4}\.\d{4,5}(v\d+)?$|^[a-z-]+\/\d{7}(v\d+)?$/;
@@ -69,6 +69,7 @@ interface DownloadChoice {
 }
 
 export interface DownloadPickerResult {
+  /** Vault-relative folder, already validated by `vaultFolder`. */
   downloadPath: string;
   papers: Paper[];
 }
@@ -90,6 +91,7 @@ export class DownloadPickerModal extends PromiseModal<DownloadPickerResult | nul
     app: App,
     private papers: Paper[],
     lastDownloadPath: string,
+    private vaultBasePath: string,
   ) {
     super(app);
     this.downloadPath = lastDownloadPath || "";
@@ -103,13 +105,17 @@ export class DownloadPickerModal extends PromiseModal<DownloadPickerResult | nul
    */
   private checkAlreadyDownloaded(): void {
     let existingFiles: string[] = [];
-    const resolvedPath = this.downloadPath ? resolveFolder(this.downloadPath) : "";
-    if (resolvedPath && fs.existsSync(resolvedPath)) {
-      try {
-        existingFiles = fs.readdirSync(resolvedPath).map((f) => f.toLowerCase());
-      } catch {
-        // can't read dir, treat as empty
-      }
+    let folder: string | null = null;
+    try {
+      folder = this.downloadPath ? vaultFolder(this.downloadPath, this.vaultBasePath) : null;
+    } catch {
+      // Not a vault folder (yet): the user may be mid-typing. Nothing to match.
+    }
+    const dir = folder === null ? null : folder === "" ? this.app.vault.getRoot() : this.app.vault.getFolderByPath(folder);
+    if (dir) {
+      existingFiles = dir.children
+        .filter((child) => child instanceof TFile)
+        .map((child) => child.name.toLowerCase());
     }
 
     const fallback = getDownloadFallback();
@@ -153,24 +159,20 @@ export class DownloadPickerModal extends PromiseModal<DownloadPickerResult | nul
 
     this.setTitle("Download papers");
 
-    // Download path row. The native folder picker used to live here but
-    // electron.remote was removed in Electron 14, so the button was silently
-    // a no-op in modern Obsidian. Users type or paste the path instead.
     const pathRow = contentEl.createDiv("citation-graph-download-path-row");
     pathRow.createEl("label", { text: "Download to:", cls: "citation-graph-download-label" });
     const pathInput = pathRow.createEl("input", {
       type: "text",
       cls: "citation-graph-download-path-input",
       value: this.downloadPath,
-      placeholder: "~/Downloads/papers",
+      placeholder: "Papers/PDFs",
     });
+    new FolderSuggest(this.app, pathInput);
     contentEl.createDiv({
       cls: "citation-graph-download-path-hint",
-      text: "Use an absolute path, or start with ~ for your home directory (e.g. ~/Downloads/papers).",
+      text: "A folder in this vault. It is created if it does not exist.",
     });
-    // Debounced: checkAlreadyDownloaded does a synchronous existsSync +
-    // readdirSync, which blocks the UI thread. Running it per keystroke
-    // freezes the modal on large or network-mounted folders.
+    // Debounced so the list is not rebuilt on every keystroke.
     pathInput.addEventListener("input", () => {
       this.downloadPath = pathInput.value.trim();
       if (this.rescanTimer) window.clearTimeout(this.rescanTimer);
@@ -216,7 +218,14 @@ export class DownloadPickerModal extends PromiseModal<DownloadPickerResult | nul
       .setCta()
       .onClick(() => {
         if (!this.downloadPath) {
-          logNotice("Please specify a download path.");
+          logNotice("Please specify a download folder.");
+          return;
+        }
+        let folder: string;
+        try {
+          folder = vaultFolder(this.downloadPath, this.vaultBasePath);
+        } catch (e) {
+          logNotice(e instanceof Error ? e.message : String(e), 10000);
           return;
         }
         const selected = this.choices
@@ -226,7 +235,7 @@ export class DownloadPickerModal extends PromiseModal<DownloadPickerResult | nul
           logNotice("No papers selected for download.");
           return;
         }
-        this.settle({ downloadPath: this.downloadPath, papers: selected });
+        this.settle({ downloadPath: folder, papers: selected });
       });
     new ButtonComponent(footer)
       .setButtonText("Cancel")
@@ -319,10 +328,15 @@ export class DownloadPickerModal extends PromiseModal<DownloadPickerResult | nul
 }
 
 /**
- * Download papers sequentially. Tries arXiv first (when an arXiv ID is
- * available), then the configured fallback source if this build has one (see
- * ../api/download-fallback). Papers no source can supply are reported as
- * failed with the reason.
+ * Download papers sequentially into `folder`, a vault-relative folder already
+ * checked by `vaultFolder`. Tries arXiv first (when an arXiv ID is available
+ * or can be looked up), then the configured fallback source if this build has
+ * one (see ../api/download-fallback). Papers no source can supply are reported
+ * as failed with the reason.
+ *
+ * Every file goes through the vault adapter. A fallback is the one exception:
+ * it runs outside Obsidian and is handed the folder's absolute path, and what
+ * it saves is checked to be inside that folder before it is renamed.
  *
  * `pluginDir` is the absolute path to the plugin's own directory; a fallback
  * receives it so it can locate helper files bundled alongside the plugin.
@@ -346,30 +360,25 @@ export interface DownloadOutcome {
 
 export async function downloadPapers(
   papers: Paper[],
-  downloadPath: string,
+  folder: string,
+  adapter: FileSystemAdapter,
   pluginDir: string,
   opts: DownloadOptions = {}
 ): Promise<DownloadOutcome> {
   const { onProgress, resolveArxiv } = opts;
   const resolvedArxiv = new Map<string, string>();
-  // Resolved to an absolute path before any filesystem use: everything below
-  // is checked against this folder, and a relative one would be checked
-  // against Obsidian's working directory instead of the user's.
-  downloadPath = resolveFolder(downloadPath);
-  // Validate the download folder up-front: a bad path would otherwise fail
+  // Validate the download folder up-front: a bad one would otherwise fail
   // every paper one-by-one with the same opaque error.
   try {
-    fs.mkdirSync(downloadPath, { recursive: true });
-    fs.accessSync(downloadPath, fs.constants.W_OK);
+    await ensureFolder(adapter, folder);
   } catch (e) {
     const reason = e instanceof Error ? e.message : String(e);
-    logNotice(`Cannot use download folder "${downloadPath}": ${reason}`, 10000);
+    logNotice(`Cannot use download folder "${folder}": ${reason}`, 10000);
     return { downloaded: 0, failed: papers.map((p) => p.title), resolvedArxiv };
   }
 
   // Probe the fallback once and gate every per-paper attempt on the result:
-  // the probe can be slow (it spawns an interactive shell) and its answer is
-  // the same for every paper in the run.
+  // the probe can be slow and its answer is the same for every paper.
   const fallback = getDownloadFallback();
   const fallbackAvailable = fallback !== null && (await fallback.isAvailable());
   // Track whether we've already surfaced a fallback setup error so we don't
@@ -384,7 +393,11 @@ export async function downloadPapers(
     if (onProgress) onProgress(i, papers.length, paper.title);
 
     try {
-      let savedPath: string | null = null;
+      // Where the PDF ends up. The title is remote-sourced; sanitizeFilename
+      // strips separators, and fileInFolder refuses anything that is still
+      // not a plain name rather than trusting that to stay true.
+      const target = fileInFolder(folder, buildPaperFilename(paper, ".pdf"));
+      let saved = false;
       let fallbackError: Error | null = null;
       let arxivError: string | null = null;
 
@@ -406,7 +419,8 @@ export async function downloadPapers(
 
       if (arxivId) {
         try {
-          savedPath = await downloadFromArxiv(arxivId, downloadPath);
+          await adapter.writeBinary(target, await downloadFromArxiv(arxivId));
+          saved = true;
           logNotice(`Downloaded from arxiv: ${paper.title}`);
         } catch (arxivErr) {
           arxivError = arxivErr instanceof Error ? arxivErr.message : String(arxivErr);
@@ -414,16 +428,20 @@ export async function downloadPapers(
         }
       }
 
-      if (!savedPath && fallback !== null && fallbackAvailable && fallback.canAttempt(paper)) {
+      if (!saved && fallback !== null && fallbackAvailable && fallback.canAttempt(paper)) {
         try {
-          savedPath = await fallback.download(paper, downloadPath, { pluginDir });
-          if (savedPath) logNotice(`Downloaded from ${fallback.name}: ${paper.title}`);
+          const savedPath = await fallback.download(paper, adapter.getFullPath(folder), { pluginDir });
+          if (savedPath) {
+            await moveIntoPlace(adapter, savedPath, folder, target);
+            saved = true;
+            logNotice(`Downloaded from ${fallback.name}: ${paper.title}`);
+          }
         } catch (e) {
           fallbackError = e instanceof Error ? e : new Error(String(e));
         }
       }
 
-      if (!savedPath) {
+      if (!saved) {
         const arxivSuffix = arxivError ? ` (arXiv attempt: ${arxivError})` : "";
         // Distinguish "arXiv does not have it" from "we never had an ID to
         // try": the first is an answer, the second used to be reported as one.
@@ -460,14 +478,6 @@ export async function downloadPapers(
         throw new Error(`Not available on arXiv or ${fallback.name}.` + arxivSuffix);
       }
 
-      // Rename to the formatted filename. sanitizeFilename already strips
-      // path separators, but the title is remote-sourced, so fileInFolder
-      // asserts containment rather than trusting that to stay true.
-      if (fs.existsSync(savedPath)) {
-        const dir = path.dirname(savedPath);
-        const newPath = fileInFolder(dir, buildPaperFilename(paper, savedPath));
-        if (path.resolve(savedPath) !== newPath) fs.renameSync(savedPath, newPath);
-      }
       downloaded++;
     } catch (e) {
       const reason = e instanceof Error ? e.message : String(e);
@@ -478,6 +488,41 @@ export async function downloadPapers(
   }
 
   return { downloaded, failed, resolvedArxiv };
+}
+
+/** Create `folder` if it is missing; throw if something other than a folder is there. */
+async function ensureFolder(adapter: FileSystemAdapter, folder: string): Promise<void> {
+  if (folder === "") return;
+  const stat = await adapter.stat(folder);
+  if (stat === null) {
+    await adapter.mkdir(folder);
+  } else if (stat.type !== "folder") {
+    throw new Error("a file with that name is in the way");
+  }
+}
+
+/**
+ * Rename what a fallback saved to the formatted filename.
+ *
+ * The fallback runs outside Obsidian and reports an absolute path, which is
+ * converted back to a vault path and must lie directly in the download
+ * folder. Anything else is refused: the plugin never moves a file it did not
+ * ask for.
+ */
+async function moveIntoPlace(
+  adapter: FileSystemAdapter,
+  savedPath: string,
+  folder: string,
+  target: string,
+): Promise<void> {
+  const folderFull = adapter.getFullPath(folder);
+  if (path.dirname(path.resolve(savedPath)) !== path.resolve(folderFull)) {
+    throw new Error(`The download source saved outside the download folder: ${savedPath}`);
+  }
+  const saved = fileInFolder(folder, path.basename(savedPath));
+  if (saved === target) return;
+  if (await adapter.exists(target)) await adapter.remove(target);
+  await adapter.rename(saved, target);
 }
 
 /**
@@ -500,23 +545,20 @@ function isAllowedArxivHost(host: string): boolean {
   );
 }
 
-/** Refuse a "PDF" larger than this: arXiv papers are far smaller, and an
- *  unbounded stream to disk is a trivial way to fill the user's drive. */
+/** Refuse a "PDF" larger than this: arXiv papers are far smaller, and the
+ *  body is held in memory until it is written to the vault. */
 const MAX_PDF_BYTES = 200 * 1024 * 1024;
 
-/** Download a PDF from arxiv given an arxiv ID (e.g. "2301.01234" or "quant-ph/0601075"). */
-function downloadFromArxiv(arxivId: string, outputDir: string): Promise<string> {
-  // Defense in depth: even though isValidArxivId gates the caller, strip any
-  // character that could escape outputDir via path traversal and assert the
-  // resolved destination stays inside it.
-  const safeId = arxivId.replace(/[^A-Za-z0-9_.-]/g, "_");
+/**
+ * Fetch a PDF from arXiv given an arXiv ID (e.g. "2301.01234" or
+ * "quant-ph/0601075") and return its bytes, checked to be a PDF.
+ *
+ * Node's https rather than Obsidian's requestUrl, because redirects have to be
+ * followed by hand: requestUrl follows them itself and gives no say over which
+ * hosts it ends up talking to.
+ */
+function downloadFromArxiv(arxivId: string): Promise<ArrayBuffer> {
   const url = `https://arxiv.org/pdf/${arxivId}`;
-  let destPath: string;
-  try {
-    destPath = fileInFolder(outputDir, `${safeId}.pdf`);
-  } catch (e) {
-    return Promise.reject(e instanceof Error ? e : new Error(String(e)));
-  }
 
   return new Promise((resolve, reject) => {
     const doRequest = (requestUrl: string, redirectsLeft: number) => {
@@ -551,56 +593,27 @@ function downloadFromArxiv(arxivId: string, outputDir: string): Promise<string> 
             return;
           }
 
-          const fileStream = fs.createWriteStream(destPath);
-
-          // Abort rather than stream an unbounded body to disk.
+          const chunks: Buffer[] = [];
           let received = 0;
           res.on("data", (chunk: Buffer) => {
             received += chunk.length;
             if (received > MAX_PDF_BYTES) {
               res.destroy();
-              fileStream.destroy();
-              fs.unlink(destPath, () => {});
               reject(new Error(`arxiv response for ${arxivId} exceeded ${MAX_PDF_BYTES} bytes`));
-            }
-          });
-
-          res.pipe(fileStream);
-          fileStream.on("finish", () => {
-            fileStream.close();
-            // Verify we got a PDF and not an error page. Every failure path
-            // here must reject: an exception thrown inside a stream event
-            // handler escapes the Promise and crashes the renderer instead.
-            let header: string;
-            let fd: number | null = null;
-            try {
-              const buf = Buffer.alloc(5);
-              fd = fs.openSync(destPath, "r");
-              fs.readSync(fd, buf, 0, 5, 0);
-              header = buf.toString();
-            } catch (err) {
-              fs.unlink(destPath, () => {});
-              reject(err instanceof Error ? err : new Error(String(err)));
               return;
-            } finally {
-              if (fd !== null) {
-                try {
-                  fs.closeSync(fd);
-                } catch {
-                  // Already closed or invalid; nothing useful to do.
-                }
-              }
             }
-            if (header !== "%PDF-") {
-              fs.unlink(destPath, () => {});
-              reject(new Error(`arxiv did not return a PDF for ${arxivId}`));
-            } else {
-              resolve(destPath);
-            }
+            chunks.push(chunk);
           });
-          fileStream.on("error", (err) => {
-            fs.unlink(destPath, () => {});
-            reject(err);
+          res.on("error", (err) => reject(err));
+          res.on("end", () => {
+            if (received > MAX_PDF_BYTES) return;
+            const body = Buffer.concat(chunks);
+            // An error page arrives with status 200 often enough to check.
+            if (body.subarray(0, 5).toString("latin1") !== "%PDF-") {
+              reject(new Error(`arxiv did not return a PDF for ${arxivId}`));
+              return;
+            }
+            resolve(body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength));
           });
         }
       );
@@ -613,4 +626,3 @@ function downloadFromArxiv(arxivId: string, outputDir: string): Promise<string> 
     doRequest(url, 5);
   });
 }
-

@@ -1,72 +1,82 @@
 import { describe, expect, it } from "vitest";
 import * as os from "os";
 import * as path from "path";
-import {
-	assertInsideFolders,
-	expandTilde,
-	fileInFolder,
-	isInside,
-	resolveFolder,
-	truncateToBytes,
-} from "./paper-files";
+import { estimatePdfPages, fileInFolder, isInside, truncateToBytes, vaultFolder } from "./paper-files";
 
 const home = os.homedir();
+const vault = path.join(home, "vaults", "research");
 
-describe("expandTilde", () => {
-	it("expands a bare tilde", () => {
-		expect(expandTilde("~")).toBe(home);
+describe("vaultFolder", () => {
+	it("keeps a vault-relative folder", () => {
+		expect(vaultFolder("Papers/PDFs", vault)).toBe("Papers/PDFs");
 	});
 
-	it("expands a tilde-rooted path", () => {
-		expect(expandTilde("~/papers")).toBe(path.join(home, "papers"));
+	it("tidies separators, dot segments and surrounding space", () => {
+		expect(vaultFolder("  Papers//./PDFs/ ", vault)).toBe("Papers/PDFs");
+		expect(vaultFolder("Papers\\PDFs", vault)).toBe("Papers/PDFs");
 	});
 
-	// "~user" needs another user's home, which cannot be resolved from here.
-	it("leaves ~user alone rather than guessing", () => {
-		expect(expandTilde("~someone/papers")).toBe("~someone/papers");
+	it("reads an empty folder as the vault root", () => {
+		expect(vaultFolder("", vault)).toBe("");
 	});
 
-	it("leaves a tilde in the middle of a path alone", () => {
-		expect(expandTilde("/srv/~backup")).toBe("/srv/~backup");
-	});
-});
-
-describe("resolveFolder", () => {
-	it("returns an absolute path", () => {
-		expect(path.isAbsolute(resolveFolder("papers"))).toBe(true);
+	it("refuses a parent reference", () => {
+		expect(() => vaultFolder("Papers/../../outside", vault)).toThrow(/\.\./);
 	});
 
-	it("expands a tilde on the way", () => {
-		expect(resolveFolder("~/papers")).toBe(path.join(home, "papers"));
+	// Settings and canvases written before PDFs moved into the vault carry
+	// absolute paths. One inside the vault keeps working.
+	it("converts an absolute path inside the vault", () => {
+		expect(vaultFolder(path.join(vault, "Papers", "PDFs"), vault)).toBe("Papers/PDFs");
+	});
+
+	it("converts a tilde path inside the vault", () => {
+		expect(vaultFolder("~/vaults/research/Papers", vault)).toBe("Papers");
+	});
+
+	it("refuses an absolute path outside the vault and says what to do", () => {
+		expect(() => vaultFolder("/srv/papers", vault)).toThrow(/outside this vault.*folder inside the vault/);
+	});
+
+	it("refuses a tilde path outside the vault", () => {
+		expect(() => vaultFolder("~/Downloads/papers", vault)).toThrow(/outside this vault/);
+	});
+
+	// "research-old" starts with "research" and is a different folder.
+	it("refuses a sibling of the vault whose name starts the same", () => {
+		expect(() => vaultFolder(vault + "-old/Papers", vault)).toThrow(/outside this vault/);
 	});
 });
 
 describe("fileInFolder", () => {
 	it("places a plain filename in the folder", () => {
-		expect(fileInFolder("/srv/papers", "A Paper (Curie) (1903).pdf")).toBe(
-			path.join("/srv/papers", "A Paper (Curie) (1903).pdf"),
+		expect(fileInFolder("Papers/PDFs", "A Paper (Curie) (1903).pdf")).toBe(
+			"Papers/PDFs/A Paper (Curie) (1903).pdf",
 		);
+	});
+
+	it("places a filename at the vault root", () => {
+		expect(fileInFolder("", "a.pdf")).toBe("a.pdf");
 	});
 
 	// The names come from remote metadata, so these are the cases that matter.
 	it("refuses a parent reference", () => {
-		expect(() => fileInFolder("/srv/papers", "../secrets.pdf")).toThrow(/Refusing/);
+		expect(() => fileInFolder("Papers", "../secrets.pdf")).toThrow(/Refusing/);
+		expect(() => fileInFolder("Papers", "..")).toThrow(/Refusing/);
 	});
 
 	it("refuses a nested path", () => {
-		expect(() => fileInFolder("/srv/papers", "sub/paper.pdf")).toThrow(/Refusing/);
+		expect(() => fileInFolder("Papers", "sub/paper.pdf")).toThrow(/Refusing/);
+		expect(() => fileInFolder("Papers", "sub\\paper.pdf")).toThrow(/Refusing/);
 	});
 
 	it("refuses an absolute path", () => {
-		expect(() => fileInFolder("/srv/papers", "/etc/passwd")).toThrow(/Refusing/);
+		expect(() => fileInFolder("Papers", "/srv/secret.pdf")).toThrow(/Refusing/);
 	});
 
-	it("refuses a path that walks out and back to a sibling", () => {
-		expect(() => fileInFolder("/srv/papers", "../notes/paper.pdf")).toThrow(/Refusing/);
-	});
-
-	it("refuses the folder itself", () => {
-		expect(() => fileInFolder("/srv/papers", ".")).toThrow(/Refusing/);
+	it("refuses the folder itself and an empty name", () => {
+		expect(() => fileInFolder("Papers", ".")).toThrow(/Refusing/);
+		expect(() => fileInFolder("Papers", "")).toThrow(/Refusing/);
 	});
 });
 
@@ -94,28 +104,15 @@ describe("isInside", () => {
 	});
 });
 
-describe("assertInsideFolders", () => {
-	it("returns the resolved path when it is inside one of them", () => {
-		expect(assertInsideFolders("/srv/papers/a.pdf", ["/tmp/x", "/srv/papers"])).toBe(
-			path.resolve("/srv/papers/a.pdf"),
-		);
+describe("estimatePdfPages", () => {
+	const pdf = (text: string) => new TextEncoder().encode(text).buffer;
+
+	it("counts page objects but not the page tree", () => {
+		expect(estimatePdfPages(pdf("<< /Type /Pages >> << /Type /Page >> << /Type/Page /X >>"))).toBe(2);
 	});
 
-	it("throws when it is inside none of them", () => {
-		expect(() => assertInsideFolders("/etc/passwd", ["/srv/papers"])).toThrow(
-			/outside every folder/,
-		);
-	});
-
-	it("ignores blank folders rather than treating them as the root", () => {
-		expect(() => assertInsideFolders("/etc/passwd", ["", "   "])).toThrow(
-			/outside every folder/,
-		);
-	});
-
-	it("expands a tilde in the allowed folder", () => {
-		const target = path.join(home, "papers", "a.pdf");
-		expect(assertInsideFolders(target, ["~/papers"])).toBe(target);
+	it("reads zero from something with no page objects", () => {
+		expect(estimatePdfPages(pdf("%PDF-1.4"))).toBe(0);
 	});
 });
 

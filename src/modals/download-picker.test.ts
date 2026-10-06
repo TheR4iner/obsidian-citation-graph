@@ -5,6 +5,7 @@ import * as path from "path";
 import type { Paper } from "../types";
 import type { DownloadFallback } from "../api/download-fallback";
 import { noticeLog } from "../../test/obsidian-stub";
+import { makeFsAdapter } from "../../test/fake-adapter";
 
 // Which source a build ships is decided by this one function, so the tests
 // drive it directly instead of reaching for a real one over the network.
@@ -52,22 +53,28 @@ function lastFailureReason(): string {
 }
 
 describe("downloadPapers", () => {
+	// The vault on disk, and the download folder inside it.
+	let vault: string;
+	const folder = "Papers/PDFs";
 	let dir: string;
+	let adapter: ReturnType<typeof makeFsAdapter>;
 
 	beforeEach(() => {
-		dir = fs.mkdtempSync(path.join(os.tmpdir(), "citation-graph-test-"));
+		vault = fs.mkdtempSync(path.join(os.tmpdir(), "citation-graph-test-"));
+		dir = path.join(vault, folder);
+		adapter = makeFsAdapter(vault);
 		noticeLog.length = 0;
 		getDownloadFallback.mockReturnValue(null);
 	});
 
 	afterEach(() => {
-		fs.rmSync(dir, { recursive: true, force: true });
+		fs.rmSync(vault, { recursive: true, force: true });
 	});
 
 	// No arXiv ID and no fallback is the public build's only failure mode, so
 	// the message has to say that rather than blaming the paper.
 	it("reports that no source is configured when the build has no fallback", async () => {
-		const result = await downloadPapers([makePaper()], dir, "/plugin");
+		const result = await downloadPapers([makePaper()], folder, adapter, "/plugin");
 
 		expect(result).toMatchObject({ downloaded: 0, failed: ["A Paper"] });
 		expect(lastFailureReason()).toContain("no other source is configured");
@@ -78,7 +85,7 @@ describe("downloadPapers", () => {
 			makeFallback({ isAvailable: async () => false }),
 		);
 
-		await downloadPapers([makePaper()], dir, "/plugin");
+		await downloadPapers([makePaper()], folder, adapter, "/plugin");
 
 		expect(lastFailureReason()).toContain("Install the prerequisite.");
 	});
@@ -88,7 +95,7 @@ describe("downloadPapers", () => {
 			makeFallback({ canAttempt: () => false }),
 		);
 
-		await downloadPapers([makePaper()], dir, "/plugin");
+		await downloadPapers([makePaper()], folder, adapter, "/plugin");
 
 		expect(lastFailureReason()).toContain("no identifier the source can use");
 	});
@@ -96,7 +103,7 @@ describe("downloadPapers", () => {
 	it("names the source when it was tried and came back empty", async () => {
 		getDownloadFallback.mockReturnValue(makeFallback());
 
-		await downloadPapers([makePaper()], dir, "/plugin");
+		await downloadPapers([makePaper()], folder, adapter, "/plugin");
 
 		expect(lastFailureReason()).toContain("Not available on arXiv or Test Source.");
 	});
@@ -118,7 +125,7 @@ describe("downloadPapers", () => {
 			makePaper({ id: "b", title: "Second" }),
 			makePaper({ id: "c", title: "Third" }),
 		];
-		const result = await downloadPapers(papers, dir, "/plugin");
+		const result = await downloadPapers(papers, folder, adapter, "/plugin");
 
 		expect(result.failed).toEqual(["First", "Second", "Third"]);
 		expect(noticeLog.filter((m) => m.includes("the prerequisite is not installed")))
@@ -136,7 +143,7 @@ describe("downloadPapers", () => {
 		);
 
 		const papers = [makePaper({ id: "a" }), makePaper({ id: "b" })];
-		await downloadPapers(papers, dir, "/plugin");
+		await downloadPapers(papers, folder, adapter, "/plugin");
 
 		expect(noticeLog.filter((m) => m.includes("that mirror refused"))).toHaveLength(2);
 	});
@@ -153,7 +160,7 @@ describe("downloadPapers", () => {
 			}),
 		);
 
-		const result = await downloadPapers([paper], dir, "/plugin");
+		const result = await downloadPapers([paper], folder, adapter, "/plugin");
 
 		expect(result).toMatchObject({ downloaded: 1, failed: [] });
 		expect(fs.readdirSync(dir)).toEqual([buildPaperFilename(paper, ".pdf")]);
@@ -166,16 +173,42 @@ describe("downloadPapers", () => {
 		// The real one comes from Vault#configDir, which the user can rename.
 		const pluginDir = path.join(dir, "plugins", "citation-graph");
 
-		await downloadPapers([makePaper()], dir, pluginDir);
+		await downloadPapers([makePaper()], folder, adapter, pluginDir);
 
 		expect(download).toHaveBeenCalledWith(expect.anything(), dir, { pluginDir });
 	});
 
-	it("fails every paper when the download folder cannot be used", async () => {
-		const unusable = path.join(dir, "a-file");
-		fs.writeFileSync(unusable, "not a directory");
+	it("creates the download folder when it is missing", async () => {
+		await downloadPapers([makePaper()], folder, adapter, "/plugin");
 
-		const result = await downloadPapers([makePaper()], unusable, "/plugin");
+		expect(fs.statSync(dir).isDirectory()).toBe(true);
+	});
+
+	// A fallback runs outside Obsidian, so what it reports is checked rather
+	// than renamed wherever it points.
+	it("refuses a file the fallback saved outside the download folder", async () => {
+		const elsewhere = path.join(vault, "elsewhere.pdf");
+		getDownloadFallback.mockReturnValue(
+			makeFallback({
+				download: async () => {
+					fs.writeFileSync(elsewhere, "%PDF-1.4");
+					return elsewhere;
+				},
+			}),
+		);
+
+		const result = await downloadPapers([makePaper()], folder, adapter, "/plugin");
+
+		expect(result).toMatchObject({ downloaded: 0, failed: ["A Paper"] });
+		expect(lastFailureReason()).toContain("saved outside the download folder");
+		expect(fs.existsSync(elsewhere)).toBe(true);
+	});
+
+	it("fails every paper when the download folder cannot be used", async () => {
+		fs.mkdirSync(path.join(vault, "Papers"));
+		fs.writeFileSync(dir, "not a directory");
+
+		const result = await downloadPapers([makePaper()], folder, adapter, "/plugin");
 
 		expect(result).toMatchObject({ downloaded: 0, failed: ["A Paper"] });
 	});
@@ -187,7 +220,7 @@ describe("downloadPapers", () => {
 		const resolveArxiv = vi.fn(async () => "2301.01234");
 		const paper = makePaper({ doi: "10.1103/PhysRevX.1.011001", notePath: "papers/A.md" });
 
-		const result = await downloadPapers([paper], dir, "/plugin", { resolveArxiv });
+		const result = await downloadPapers([paper], folder, adapter, "/plugin", { resolveArxiv });
 
 		expect(resolveArxiv).toHaveBeenCalledWith(paper);
 		// The download itself is not stubbed, so it fails; what matters is that
@@ -197,7 +230,7 @@ describe("downloadPapers", () => {
 	});
 
 	it("says arXiv was searched when the lookup comes up empty", async () => {
-		const result = await downloadPapers([makePaper()], dir, "/plugin", {
+		const result = await downloadPapers([makePaper()], folder, adapter, "/plugin", {
 			resolveArxiv: async () => null,
 		});
 
@@ -206,7 +239,7 @@ describe("downloadPapers", () => {
 	});
 
 	it("does not claim arXiv was searched when no resolver was supplied", async () => {
-		await downloadPapers([makePaper()], dir, "/plugin");
+		await downloadPapers([makePaper()], folder, adapter, "/plugin");
 
 		expect(lastFailureReason()).not.toContain("searched by DOI");
 	});

@@ -51,7 +51,7 @@ class ChoiceModal<T> extends PromiseModal<T> {
         .setButtonText(choice.text)
         .onClick(() => this.settle(choice.value));
       if (choice.cta) button.setCta();
-      if (choice.warning) button.setWarning();
+      if (choice.warning) button.setDestructive();
     }
     new ButtonComponent(footer)
       .setButtonText("Cancel")

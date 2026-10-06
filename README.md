@@ -47,7 +47,7 @@ Zoomed out, the shape of the literature shows: papers are placed left to right b
 
 ## Requirements
 
-- **Obsidian 1.7.2 or later**, on desktop. The plugin talks to local processes and the filesystem, so it does not run on mobile.
+- **Obsidian 1.13.0 or later**, on desktop. The plugin reads Zotero over a local connection and can run the Claude CLI, so it does not run on mobile.
 - **Zotero**, running, with the local API enabled: Edit, Settings, Advanced, then tick *"Allow other applications on this computer to communicate with Zotero"*.
 - **Better BibTeX** (recommended) for the citekeys used in note filenames and matching.
 - For *Write summary* and *Recommend papers*: an API key for Anthropic, OpenAI or Google Gemini, or the Claude CLI installed locally.
@@ -69,17 +69,21 @@ Nothing here happens without you running a command, and nothing is collected abo
 | `api.zotero.org` | *Sync canvas to Zotero* | Paper metadata, plus your Zotero API key |
 | `api.anthropic.com`, `api.openai.com`, `generativelanguage.googleapis.com` | *Write summary*, *Recommend papers* | The paper's PDF, or the canvas's titles, authors, years and identifiers; abstracts only if you tick *Include abstracts* |
 
-**Files outside your vault.** PDFs are not notes, so they are not kept in the vault. *Download* writes them to the folder you name, and *Write summary* reads them back from it to send to a model. It also writes its own log and reference cache inside its plugin folder, which lives in your vault's configuration directory.
+**Your files.** The plugin reads and writes files only inside your vault, through Obsidian's own file API. PDFs live in a vault folder you name: *Download* saves them there and *Write summary* reads them back from it to send to a model. Its log and reference cache live in its plugin folder, inside your vault's configuration directory.
 
-Nothing else is reachable, and that is enforced rather than intended. Every path outside the vault is built in one place (`src/paper-files.ts`) and has to resolve inside a folder you named, in the *Default download path* setting or in a canvas's own download folder. A filename that would escape its folder is refused before anything is opened. That check exists because the names are not the plugin's to trust: a paper's title, its authors and its arXiv ID all arrive from a remote service and end up in filenames.
+A filename that would leave its folder is refused before anything is written. That check exists because the names are not the plugin's to trust: a paper's title, its authors and its arXiv ID all arrive from a remote service and end up in filenames.
+
+**Keeping PDFs out of version control or sync.** PDFs are large, and you may not want them committed or synced along with your notes. If your vault is a git repository, add the download folder to its `.gitignore`, for example a line reading `Papers/PDFs/`. If you use Obsidian Sync, add the folder under *Excluded folders* in Sync's settings. The plugin works the same either way.
 
 Inside your vault, the plugin reads the list of files to find literature notes by their identifiers and to offer you other canvases. It reads and writes the notes and canvases it manages, and leaves the rest alone.
 
-**A local process.** If you choose the *Claude CLI* provider, *Write summary* and *Recommend papers* run the `claude` binary already installed on your machine, at the path you configure. Nothing is downloaded or installed for you, ever. It is the only program the plugin runs, and it is constrained three ways:
+**A local process.** If you choose the *Claude CLI* provider, *Write summary* and *Recommend papers* run the `claude` binary already installed on your machine. Nothing is downloaded or installed for you, ever. It is the only program the plugin runs, it runs only when you start one of those two commands, and it is constrained three ways:
 
-- **No shell.** The binary is launched directly with an argument list, so nothing in a prompt or a paper title can become a command. The configured path is checked first: it must be an absolute path to a file that exists, or the bare name `claude`.
+- **No shell.** The binary is launched directly with an argument list, so nothing in a prompt or a paper title can become a command. The configured path must be an absolute path or the bare name `claude`; when it is blank, `~/.local/bin` (where the official installer puts it) is searched before the rest of `PATH`.
 - **A curated environment.** A child process normally inherits every variable in the one that started it, which here would hand a third-party binary every secret you have exported: your Zotero key, your OpenAI key, whatever else is in the shell Obsidian was launched from. It is given what it needs to run and find its own configuration (`PATH`, `HOME`, the temporary directory, `ANTHROPIC_*` and `CLAUDE_*`) and nothing else.
 - **A time limit.** The run is capped, so a hung CLI cannot sit there indefinitely.
+
+The CLI reads the PDF itself, from its path in your vault folder. Obsidian's plugin directory flags any plugin that can run a program as *Shell execution*, and this provider is why Citation Graph carries that flag. It is kept on purpose: it bills summaries and recommendations to your Claude subscription instead of per call to an API key, and it is the only provider that reports what the model is doing while a long recommendation run is in progress. If you would rather the plugin never run a program, pick one of the API providers; the CLI is then never started.
 
 **Costs.** The plugin is free, and so is everything it needs to build a canvas. *Write summary* and *Recommend papers* are the exception: they call Anthropic, OpenAI or Google under your own account, and those providers bill you per call. Without a key there are no summaries and no recommendations; every other feature works without one.
 
@@ -169,11 +173,13 @@ The list lives in the canvas file, so it travels with the canvas. Review it, or 
 
 ### Write summary
 
-**Write summary finds the PDF** by looking for `Title (Author) (Year).pdf` in the canvas's last download directory and then in the default download path, and offers to download it if it is missing, arXiv lookup included. It warns before summarising anything over ten pages, and asks whether to append or replace when a `## Summary` section already exists. It runs only when you ask for it: adding a paper to a canvas never starts a summary on its own.
+**Write summary finds the PDF** by looking for `Title (Author) (Year).pdf` in the canvas's last download folder and then in the default download folder, and offers to download it if it is missing, arXiv lookup included. It warns before summarising anything over ten pages, and asks whether to append or replace when a `## Summary` section already exists. It runs only when you ask for it: adding a paper to a canvas never starts a summary on its own.
 
 ### Download
 
-**Download** saves as `Title (FirstAuthor) (Year).pdf`. With exactly one paper selected and a download folder already known (the canvas's last one, or the *Default download path* setting), it downloads straight away; otherwise it opens a picker where you choose the papers and the folder. Papers already in the target directory are marked `downloaded` and left unchecked.
+**Download** saves as `Title (FirstAuthor) (Year).pdf` in a folder of your vault, created if it does not exist. With exactly one paper selected and a download folder already known (the canvas's last one, or the *Default download folder* setting), it downloads straight away; otherwise it opens a picker where you choose the papers and the folder, with your vault's folders suggested as you type. Papers already in the folder are marked `downloaded` and left unchecked.
+
+Versions before 0.7.0 saved PDFs anywhere on disk. A stored folder that points inside the vault, even written as an absolute or `~` path, keeps working. One that points outside it is refused with a message: pick a vault folder and move the PDFs you already have into it.
 
 **arXiv is always checked before a paper is called unavailable.** A paper added by the DOI of its published version usually has no arXiv ID recorded, because Semantic Scholar files the preprint and the journal article as two unrelated records; the preprint is on arXiv all the same. Such a paper is marked `no ID yet` and left unticked, so a large canvas does not open with dozens of lookups queued, but it stays selectable. Selecting it makes the download run look the paper up: first through the arXiv-minted DOI, then through OpenAlex's record of where the DOI is hosted, then by searching arXiv for the exact title. Any ID found is written into the note's frontmatter, so the next run needs no lookup.
 
@@ -205,7 +211,7 @@ The closing notice reports how many edges were added, how many papers came from 
 
 ## Settings
 
-The settings tab presents these in the order below. Only **Collections folder** sits above the first heading; every other section name here is a heading in the tab.
+Every setting is indexed by Obsidian's settings search. The settings tab presents these in the order below. Only **Collections folder** sits above the first heading; every other section name here is a heading in the tab.
 
 ### General
 
@@ -285,7 +291,7 @@ The provider chosen here is also the one *Recommend papers* uses.
 
 | Setting | Description | Default |
 |---|---|---|
-| **Default download path** | Where PDFs are saved. Absolute, or starting with `~` | |
+| **Default download folder** | Vault folder where PDFs are saved and where *Write summary* looks for them. To keep PDFs out of git or Obsidian Sync, see [Keeping PDFs out of version control or sync](#what-this-plugin-sends-reads-and-costs) | |
 
 ### Banned papers
 
@@ -362,7 +368,7 @@ Tests run under [vitest](https://vitest.dev) over the plugin's pure logic: readi
 
 ### Adding a PDF download source
 
-The download path is written against the `DownloadFallback` interface in `src/api/download-fallback.ts`. A build ships at most one fallback, returned by `getDownloadFallback()` in `src/api/fallback-source.ts`, which returns `null` here. Implement the interface in its own module and return an instance from that function: the picker's row gating, progress reporting and error messages pick it up with no other changes.
+The download path is written against the `DownloadFallback` interface in `src/api/download-fallback.ts`. A build ships at most one fallback, returned by `getDownloadFallback()` in `src/api/fallback-source.ts`, which returns `null` here. Implement the interface in its own module and return an instance from that function: the picker's row gating, progress reporting and error messages pick it up with no other changes. A fallback runs outside Obsidian, so it is handed the download folder's absolute path and must save directly inside it; the plugin then renames the file to its formatted name through the vault adapter, and refuses one saved anywhere else.
 
 ## Contributing
 
