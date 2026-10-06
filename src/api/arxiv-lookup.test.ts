@@ -5,6 +5,7 @@ import {
 	arxivIdFromDoi,
 	arxivIdFromUrl,
 	findArxivId,
+	parsePaperIdentifier,
 	titlesIdentical,
 } from "./arxiv-lookup";
 import type { ArxivMetadataClient } from "./arxiv-metadata";
@@ -86,6 +87,33 @@ describe("arxivIdFromUrl", () => {
 	// A host merely ending in the string is a different site.
 	it("ignores a lookalike host", () => {
 		expect(arxivIdFromUrl("https://notarxiv.org.example.com/abs/1706.03762")).toBeNull();
+	});
+});
+
+describe("parsePaperIdentifier", () => {
+	it.each([
+		"2409.00998",
+		"arXiv:2409.00998",
+		"arxiv: 2409.00998",
+		"https://arxiv.org/abs/2409.00998",
+		"http://www.arxiv.org/pdf/2409.00998.pdf",
+		"10.48550/arXiv.2409.00998",
+		"https://doi.org/10.48550/arXiv.2409.00998",
+		"[arXiv:2409.00998](https://arxiv.org/abs/2409.00998)",
+	])("reads %s as an arXiv ID", (input) => {
+		expect(parsePaperIdentifier(input)).toEqual({ doi: null, arxiv: "2409.00998" });
+	});
+
+	it("keeps an arXiv version suffix", () => {
+		expect(parsePaperIdentifier("arXiv:2409.00998v2").arxiv).toBe("2409.00998v2");
+	});
+
+	it.each([
+		"10.1103/PhysRevLett.122.040504",
+		"doi:10.1103/PhysRevLett.122.040504",
+		"https://doi.org/10.1103/PhysRevLett.122.040504",
+	])("reads %s as a DOI", (input) => {
+		expect(parsePaperIdentifier(input)).toEqual({ doi: "10.1103/PhysRevLett.122.040504", arxiv: null });
 	});
 });
 

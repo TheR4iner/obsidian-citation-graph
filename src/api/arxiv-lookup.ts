@@ -31,6 +31,23 @@ export function arxivIdFromUrl(url: unknown): string | null {
 }
 
 /**
+ * Split what a user typed or pasted into a DOI or an arXiv ID.
+ *
+ * Accepts a bare ID, `arXiv:` or `doi:` prefixes, doi.org and arxiv.org URLs,
+ * and a markdown link to any of those, as copied out of a note.
+ */
+export function parsePaperIdentifier(raw: string): { doi: string | null; arxiv: string | null } {
+  const trimmed = raw.trim();
+  const markdownLink = trimmed.match(/^\[[^\]]*\]\(([^)\s]+)\)$/);
+  const input = (markdownLink ? markdownLink[1] : trimmed)
+    .replace(/^https?:\/\/(?:dx\.)?doi\.org\//i, "")
+    .replace(/^doi:\s*/i, "")
+    .trim();
+  const arxiv = arxivIdFromDoi(input) ?? arxivIdFromUrl(input) ?? normalizeArxiv(input);
+  return arxiv ? { doi: null, arxiv } : { doi: input, arxiv: null };
+}
+
+/**
  * Whether two titles are the same title.
  *
  * Compared on letters and digits alone: arXiv, OpenAlex and Zotero disagree

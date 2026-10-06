@@ -40,7 +40,7 @@ import { OpenAlexClient } from "./api/openalex";
 import { CrossRefClient } from "./api/crossref";
 import { ArxivMetadataClient } from "./api/arxiv-metadata";
 import { resolvePaperWithRefs } from "./api/multi-source";
-import { findArxivId } from "./api/arxiv-lookup";
+import { findArxivId, parsePaperIdentifier } from "./api/arxiv-lookup";
 import { asNumber, asRecord, asString, asStringArray } from "./api/json";
 import { fetchRefsAndCitations } from "./api/multi-source";
 import { CollectionPickerModal } from "./modals/collection-picker";
@@ -216,6 +216,9 @@ export default class CitationGraphPlugin extends Plugin {
     await this.s2Cache.load();
 
     this.s2Client = new SemanticScholarClient();
+    this.s2Client.onRateLimitWait((seconds, context) =>
+      logOnly(`Semantic Scholar rate limit while ${context}; retrying in ${seconds}s.`)
+    );
     this.openAlexClient = new OpenAlexClient();
     this.crossRefClient = new CrossRefClient();
     this.arxivClient = new ArxivMetadataClient();
@@ -862,11 +865,19 @@ export default class CitationGraphPlugin extends Plugin {
         references = cached.references;
         citations = cached.citations;
       } else {
-        logNotice("Fetching references and citations...");
-        const multiResult = await fetchRefsAndCitations(
-          doi, arxivId, s2Id, this.settings,
-          { s2: this.s2Client, openalex: this.openAlexClient, crossref: this.crossRefClient },
-        );
+        logOnly("Fetching references and citations...");
+        const progress = new ProgressNotice("Fetching references and citations");
+        let multiResult;
+        try {
+          multiResult = await this.withS2Progress(progress, () =>
+            fetchRefsAndCitations(
+              doi, arxivId, s2Id, this.settings,
+              { s2: this.s2Client, openalex: this.openAlexClient, crossref: this.crossRefClient },
+            )
+          );
+        } finally {
+          progress.hide();
+        }
 
         if (multiResult) {
           references = multiResult.references;
@@ -1009,6 +1020,22 @@ export default class CitationGraphPlugin extends Plugin {
       logNotice(`Error: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
+  /**
+   * Run `fn` while `progress` shows any Semantic Scholar backoff wait. Without
+   * it a command stalled on retries, or queued behind another command's
+   * request, looks exactly like one that died.
+   */
+  private async withS2Progress<T>(progress: ProgressNotice, fn: () => Promise<T>): Promise<T> {
+    const unsubscribe = this.s2Client.onRateLimitWait((seconds) =>
+      progress.setHint(`Semantic Scholar rate limit, retrying in ${seconds}s`)
+    );
+    try {
+      return await fn();
+    } finally {
+      unsubscribe();
+    }
+  }
+
   // ─── Add Paper by DOI or arXiv ──────────────────────────
 
   private async addPaperByDoi(): Promise<void> {
@@ -1025,35 +1052,27 @@ export default class CitationGraphPlugin extends Plugin {
       if (!rawInput) return;
 
       // 3. Parse input: DOI URL, arxiv DOI, arxiv ID, or plain DOI
-      let s2Query: string;
-      let doi: string | null = null;
-      let arxiv: string | null = null;
-      let input = rawInput.replace(/^https?:\/\/doi\.org\//i, "").replace(/^https?:\/\/arxiv\.org\/abs\//i, "").trim();
+      const { doi, arxiv } = parsePaperIdentifier(rawInput);
+      const s2Query = arxiv ? `ARXIV:${arxiv}` : `DOI:${doi}`;
 
-      // arxiv-minted DOIs (10.48550/arXiv.XXXX.XXXXX) → use arxiv ID
-      const arxivDoiMatch = input.match(/^10\.48550\/arXiv\.(.+)$/i);
-      if (arxivDoiMatch) {
-        arxiv = arxivDoiMatch[1];
-        s2Query = `ARXIV:${arxiv}`;
-      } else if (/^\d{4}\.\d{4,5}(v\d+)?$/.test(input) || /^[a-z-]+\/\d{7}(v\d+)?$/.test(input)) {
-        // Raw arxiv ID
-        arxiv = input;
-        s2Query = `ARXIV:${input}`;
-      } else {
-        doi = input;
-        s2Query = `DOI:${input}`;
+      logOnly(`Looking up ${s2Query}...`);
+      const progress = new ProgressNotice(`Looking up ${s2Query}`);
+      let resolved;
+      try {
+        resolved = await this.withS2Progress(progress, () =>
+          resolvePaperWithRefs(
+            { doi, arxiv, s2Query },
+            {
+              s2: this.s2Client,
+              openalex: this.openAlexClient,
+              crossref: this.crossRefClient,
+              arxiv: this.arxivClient,
+            }
+          )
+        );
+      } finally {
+        progress.hide();
       }
-
-      logNotice(`Looking up ${s2Query}...`);
-      const resolved = await resolvePaperWithRefs(
-        { doi, arxiv, s2Query },
-        {
-          s2: this.s2Client,
-          openalex: this.openAlexClient,
-          crossref: this.crossRefClient,
-          arxiv: this.arxivClient,
-        }
-      );
 
       if (!resolved) {
         logNotice("Paper not found on Semantic Scholar, OpenAlex, arXiv, or CrossRef.");
@@ -1295,9 +1314,11 @@ export default class CitationGraphPlugin extends Plugin {
           citations = cached.citations;
           fromCache++;
         } else {
-          const result = await fetchRefsAndCitations(
-            paper.doi, paper.arxiv, paper.semanticScholarId, this.settings,
-            { s2: this.s2Client, openalex: this.openAlexClient, crossref: this.crossRefClient },
+          const result = await this.withS2Progress(progress, () =>
+            fetchRefsAndCitations(
+              paper.doi, paper.arxiv, paper.semanticScholarId, this.settings,
+              { s2: this.s2Client, openalex: this.openAlexClient, crossref: this.crossRefClient },
+            )
           );
           if (!result) {
             // Every source came back empty. Usually the paper is too new or too
@@ -1494,13 +1515,9 @@ export default class CitationGraphPlugin extends Plugin {
 
       const checking = "checking each paper exists";
       const verifyProgress = new ProgressNotice(`Verifying 1/${fresh.length}`, checking);
-      // Surface a backoff wait rather than letting the count appear to stall.
-      this.s2Client.onRateLimitWait = (seconds) => {
-        verifyProgress.setHint(`Semantic Scholar rate limit, retrying in ${seconds}s`);
-      };
       let verifyResult;
       try {
-        verifyResult = await verifyRecommendations(
+        verifyResult = await this.withS2Progress(verifyProgress, () => verifyRecommendations(
           fresh,
           {
             s2: this.s2Client,
@@ -1512,9 +1529,8 @@ export default class CitationGraphPlugin extends Plugin {
             verifyProgress.setStatus(`Verifying ${done}/${total}: ${title.slice(0, 60)}`);
             verifyProgress.setHint(checking);
           }
-        );
+        ));
       } finally {
-        this.s2Client.onRateLimitWait = null;
         verifyProgress.hide();
       }
 

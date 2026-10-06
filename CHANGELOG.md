@@ -6,6 +6,13 @@ Each released version here is also the body of the matching [GitHub release](htt
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-10-06
+
+### Fixed
+
+- *Add paper by DOI or arXiv* now accepts an arXiv ID written with its `arXiv:` prefix (`arXiv:2409.00998`), a `doi:` prefix, an arxiv.org PDF link, and a markdown link copied out of a note. Before, any of these was looked up as if it were a DOI and reported as not found, even for a paper every source knows.
+- Adding a paper by DOI or arXiv ID, expanding a paper, and resolving missing edges no longer look frozen while Semantic Scholar is rate limiting. Semantic Scholar sometimes refuses requests for a while, and the plugin waits and retries for up to about a minute before giving up. During that wait these commands showed nothing, so a lookup that was about to succeed looked like one that had failed silently, and running it again only queued a second lookup behind the first. They now keep a notice up with an elapsed-time clock and say when they are waiting out a rate limit, and every such wait is written to the log file.
+
 ## [0.6.0] - 2026-09-03
 
 ### Changed
@@ -121,7 +128,8 @@ First public release.
 - **Sync canvas to Zotero**, **Send papers to canvas**, **Relayout canvas**, **Delete paper**, and **Clear Semantic Scholar cache**.
 - Settings for the collections folder, the Zotero and Semantic Scholar API keys, node size, the five status colours, and the full LLM configuration.
 
-[Unreleased]: https://github.com/TheR4iner/obsidian-citation-graph/compare/0.6.0...HEAD
+[Unreleased]: https://github.com/TheR4iner/obsidian-citation-graph/compare/0.6.1...HEAD
+[0.6.1]: https://github.com/TheR4iner/obsidian-citation-graph/compare/0.6.0...0.6.1
 [0.6.0]: https://github.com/TheR4iner/obsidian-citation-graph/compare/0.5.0...0.6.0
 [0.5.0]: https://github.com/TheR4iner/obsidian-citation-graph/compare/0.4.0...0.5.0
 [0.4.0]: https://github.com/TheR4iner/obsidian-citation-graph/compare/0.3.0...0.4.0
