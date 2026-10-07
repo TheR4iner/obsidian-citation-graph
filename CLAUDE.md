@@ -1,14 +1,13 @@
 # Citation Graph Plugin -- Developer Notes
 
-## README maintenance
+## README and guide maintenance
 
-After any change that adds, removes, or modifies a command or setting, update `README.md` before committing. The README is the authoritative reference for users and must stay in sync with the code.
+User documentation lives in two files, and both must stay in sync with the code:
 
-Specifically check:
-- The **Features** list at the top
-- The **Commands** section (one subsection per command)
-- The **Configuration** settings table
-- The **Prerequisites** section if new external tools are required
+- `README.md` is what Obsidian's plugin page shows, so it stays short: features, quick start, optional setup, a one-line-per-command table, privacy and costs. Add to it only what a new user needs; detail goes in the guide.
+- `docs/guide.md` is the full reference: every command, setting (with defaults), behaviour, service contacted and what is sent, limitations, development.
+
+After any change that adds, removes, or modifies a command or setting, update both before committing: the README's Features list, Commands table and Optional setup table, and the guide's Commands, Settings tables and Requirements. The README links images and the guide by absolute GitHub URL, because Obsidian renders it outside the repository.
 
 ## Changelog maintenance
 

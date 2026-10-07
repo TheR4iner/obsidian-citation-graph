@@ -6,6 +6,10 @@ Each released version here is also the body of the matching [GitHub release](htt
 
 ## [Unreleased]
 
+### Changed
+
+- The README, which Obsidian shows on the plugin's page, is now a short overview: what the plugin does, how to start, what to set up, and what it sends where. Everything it used to cover in detail is in the [full guide](https://github.com/TheR4iner/obsidian-citation-graph/blob/main/docs/guide.md).
+
 ## [0.7.1] - 2026-10-07
 
 ### Fixed
