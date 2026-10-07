@@ -6,6 +6,8 @@ Each released version here is also the body of the matching [GitHub release](htt
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-10-07
+
 ### Fixed
 
 - *Write summary* with the Claude CLI now reads the paper's PDF. The PDF's path was passed in a way the CLI ignores, so the model never saw the file and wrote its summary from the title and metadata alone. The path is now part of the prompt, and the summary is based on the paper's content.
@@ -155,7 +157,8 @@ First public release.
 - **Sync canvas to Zotero**, **Send papers to canvas**, **Relayout canvas**, **Delete paper**, and **Clear Semantic Scholar cache**.
 - Settings for the collections folder, the Zotero and Semantic Scholar API keys, node size, the five status colours, and the full LLM configuration.
 
-[Unreleased]: https://github.com/TheR4iner/obsidian-citation-graph/compare/0.7.0...HEAD
+[Unreleased]: https://github.com/TheR4iner/obsidian-citation-graph/compare/0.7.1...HEAD
+[0.7.1]: https://github.com/TheR4iner/obsidian-citation-graph/compare/0.7.0...0.7.1
 [0.7.0]: https://github.com/TheR4iner/obsidian-citation-graph/compare/0.6.2...0.7.0
 [0.6.2]: https://github.com/TheR4iner/obsidian-citation-graph/compare/0.6.1...0.6.2
 [0.6.1]: https://github.com/TheR4iner/obsidian-citation-graph/compare/0.6.0...0.6.1
