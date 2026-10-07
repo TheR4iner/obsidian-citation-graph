@@ -31,6 +31,8 @@ The only program the plugin runs, kept deliberately (user decision, 2026-10-07):
 - **`shell: false`** with an argument array. The arguments carry a prompt and a paper title, both arbitrary remote text; passed this way they are inert.
 - **`isUsableCliPath`** gates the configured path: an absolute path, or the bare name `claude`. A relative path, another bare name, or anything carrying a shell operator or control character is refused. `resolveClaudeCliPath` **throws** rather than falling back. The old existence check (`fs.statSync`) is gone with `fs`; spawn's ENOENT is reported with the path it tried.
 - **`cliSearchPath`** builds the child's PATH as `~/.local/bin` first, then the inherited PATH. spawn resolves the command through `options.env.PATH`, so this finds the official installer's binary first, which the old code did by probing the file.
+- **`cliInvocation()`** builds the arguments and working directory. `--tools` lists only what the request needs (Read with a PDF; WebSearch, WebFetch with search; otherwise empty). The cwd is the PDF's folder (tmpdir without one): in print mode Claude Code allows Read inside cwd and denies outside it, verified on 2026-10-07 with a planted "read this other file" instruction. `--setting-sources ""` keeps the user's own permission allow rules and hooks out; `--strict-mcp-config` with no config loads no MCP servers. Do not use `--bare`: it skips keychain reads, which subscription login needs.
+- **The PDF path goes in the prompt.** Until 0.7.1 it was passed as an extra argument after the prompt, which `claude -p` silently ignores, so CLI summaries never read the PDF (verified: the model answers "no file"). Easy to regress; there is a test.
 - **`cliEnvironment()`** builds the child's environment from an allow-list instead of inheriting. Without it the CLI received every secret exported into the shell Obsidian was launched from.
 
 `windowsHide: true` is set as well, to avoid a console flash on Windows.
@@ -45,6 +47,8 @@ The only program the plugin runs, kept deliberately (user decision, 2026-10-07):
 - The environment allow-list is a guess at what the CLI needs across three platforms. Too narrow and the CLI stops finding its config; there is no test that can catch that, only a user reporting it.
 
 ## History
+
+**2026-10-07 -- CLI hardening and the ignored-PDF bug.** Restricting the CLI's tools surfaced that the PDF path argument had never reached the model. Both fixed in 0.7.1, tested against the real CLI with a cheap model and a hand-built PDF.
 
 **2026-10-07 -- PDFs into the vault; `fs` removed.** To clear the Direct Filesystem Access warning, the download folder became a vault folder and every file operation moved to the vault adapter. Old absolute folders inside the vault are converted, outside ones refused with instructions. The Claude CLI was kept (Shell Execution stays), and its `~/.local/bin` probe became a PATH entry so `llm.ts` needs no `fs` either. Verified in an isolated Obsidian 1.14.4 (separate `XDG_CONFIG_HOME`, `xvfb-run`, driven over `--remote-debugging-port`): real arXiv download into `Papers/PDFs`, picker marks it downloaded, *Write summary* with a fake CLI script received the PDF's absolute path. That harness is worth reusing; see [[Community plugin submission]].
 
