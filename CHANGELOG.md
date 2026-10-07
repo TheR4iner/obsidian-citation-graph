@@ -6,6 +6,12 @@ Each released version here is also the body of the matching [GitHub release](htt
 
 ## [Unreleased]
 
+## [0.7.2] - 2026-10-07
+
+### Changed
+
+- The README, which Obsidian shows on the plugin's page, is now a short overview: what the plugin does, how to start, what to set up, and what it sends where. Everything it used to cover in detail is in the [full guide](https://github.com/TheR4iner/obsidian-citation-graph/blob/main/docs/guide.md).
+
 ## [0.7.1] - 2026-10-07
 
 ### Fixed
@@ -157,7 +163,8 @@ First public release.
 - **Sync canvas to Zotero**, **Send papers to canvas**, **Relayout canvas**, **Delete paper**, and **Clear Semantic Scholar cache**.
 - Settings for the collections folder, the Zotero and Semantic Scholar API keys, node size, the five status colours, and the full LLM configuration.
 
-[Unreleased]: https://github.com/TheR4iner/obsidian-citation-graph/compare/0.7.1...HEAD
+[Unreleased]: https://github.com/TheR4iner/obsidian-citation-graph/compare/0.7.2...HEAD
+[0.7.2]: https://github.com/TheR4iner/obsidian-citation-graph/compare/0.7.1...0.7.2
 [0.7.1]: https://github.com/TheR4iner/obsidian-citation-graph/compare/0.7.0...0.7.1
 [0.7.0]: https://github.com/TheR4iner/obsidian-citation-graph/compare/0.6.2...0.7.0
 [0.6.2]: https://github.com/TheR4iner/obsidian-citation-graph/compare/0.6.1...0.6.2
