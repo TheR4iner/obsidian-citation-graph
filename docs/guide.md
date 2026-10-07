@@ -24,7 +24,7 @@ Everything about the plugin in detail. For a short overview, see the [README](..
 
 Zoomed out, the shape of the literature shows: papers are placed left to right by publication year, and an edge appears wherever one paper on the canvas cites another.
 
-**Grow it.** *Expand paper* finds a paper's references and citing works, filtered by direction, keyword and year, and sorted by citation count. Pick what to add, and notes, nodes and edges appear (with the new papers optionally pushed to Zotero). The same run also links the expanded paper to papers already on the canvas that cite it or that it cites. *Resolve missing citation edges* does that for the whole canvas at once: it re-checks every paper and draws every edge the canvas does not yet have, without moving a single node. *Add paper by DOI or arXiv* adds one paper directly; if Semantic Scholar does not know it, the plugin falls back to OpenAlex, arXiv and Crossref so it still lands with whatever metadata exists.
+**Grow it.** *Expand paper* finds a paper's references and citing works, filtered by direction, keyword and year, and sorted by citation count, year, title or the order the paper cites them, each ascending or descending. Pick what to add, and notes, nodes and edges appear (with the new papers optionally pushed to Zotero). The same run also links the expanded paper to papers already on the canvas that cite it or that it cites. *Resolve missing citation edges* does that for the whole canvas at once: it re-checks every paper and draws every edge the canvas does not yet have, without moving a single node. *Add paper by DOI or arXiv* adds one paper directly; if Semantic Scholar does not know it, the plugin falls back to OpenAlex, arXiv and Crossref so it still lands with whatever metadata exists.
 
 **Prune it.** Any paper you are offered can be marked uninteresting instead of added, and it is then never offered on that canvas again.
 
@@ -54,8 +54,8 @@ Nothing here happens without you running a command, and nothing is collected abo
 | --- | --- | --- |
 | Zotero local API, `localhost:23119` | *Create from collection*, *Create from tag* | Nothing leaves your machine |
 | `api.semanticscholar.org` | Resolving papers and their citation links | DOIs, arXiv IDs, paper titles |
-| `api.openalex.org` | Papers Semantic Scholar cannot resolve; finding an arXiv preprint behind a publisher DOI | DOIs, and your contact email if you set one |
-| `api.crossref.org` | Papers the above cannot resolve | DOIs, and your contact email if you set one |
+| `api.openalex.org` | Extra references and citing works when expanding a paper or resolving edges; papers Semantic Scholar cannot resolve; finding an arXiv preprint behind a publisher DOI | DOIs, and your contact email if you set one |
+| `api.crossref.org` | Reference lists, and their order, when expanding a paper or resolving edges; papers the above cannot resolve | DOIs, and your contact email if you set one |
 | `export.arxiv.org`, `arxiv.org` | arXiv metadata, title search, PDF download | arXiv IDs, paper titles |
 | `api.zotero.org` | *Sync canvas to Zotero* | Paper metadata, plus your Zotero API key |
 | `api.anthropic.com`, `api.openai.com`, `generativelanguage.googleapis.com` | *Write summary*, *Recommend papers* | The paper's PDF, or the canvas's titles, authors, years and identifiers; abstracts only if you tick *Include abstracts* |
@@ -183,11 +183,11 @@ Reach for it after a stretch of adding papers one at a time, after *Send papers 
 
 Cached reference data is reused, so a second run over the same canvas is nearly instant. **(force refresh)** ignores the cache and re-queries every paper, which is what to use when the cached answer looks wrong or predates a paper you expect to be cited by. A full refresh is one round of requests per paper, so on a large canvas it is slow without a Semantic Scholar API key. See [Rate limits](#rate-limits).
 
-The closing notice reports how many edges were added, how many papers came from the cache, how many returned no citation data at all, and how many carry no DOI, arXiv ID or Semantic Scholar ID to look up. The titles behind the last two counts go to `citation-graph.log`.
+The closing notice reports how many edges were added, how many papers came from the cache, how many returned no citation data at all, how many came back incomplete because a citation source could not be reached, and how many carry no DOI, arXiv ID or Semantic Scholar ID to look up. Incomplete results are used for this run but not cached, so the next run asks again. The titles behind the last three counts go to `citation-graph.log`.
 
 ### Rate limits
 
-**Semantic Scholar rate limits are retried, not swallowed.** Verification is one request per suggestion against a service that allows roughly 100 every 5 minutes without an API key, so ten suggestions take about half a minute and can be throttled anyway. A refused request is retried after 5, 15 and 45 seconds, and the notice says so while it waits. If it is still refused, verification stops and reports the remaining suggestions as *never checked* rather than discarding them as nonexistent. An API key raises the ceiling and cuts the spacing between requests from 3 seconds to 1, and takes effect as soon as you enter it.
+**Semantic Scholar rate limits are retried, not swallowed.** Verification is one request per suggestion against a service that allows roughly 100 every 5 minutes without an API key, so ten suggestions take about half a minute and can be throttled anyway. A refused request is retried after 5, 15 and 45 seconds, and the notice says so while it waits. When *Expand paper* still cannot reach Semantic Scholar, it shows the references OpenAlex and Crossref found, says the list may be missing papers, and does not cache it, so expanding again later fetches the full list. If it is still refused, verification stops and reports the remaining suggestions as *never checked* rather than discarding them as nonexistent. An API key raises the ceiling and cuts the spacing between requests from 3 seconds to 1, and takes effect as soon as you enter it.
 
 ### Send papers to canvas
 
@@ -226,7 +226,7 @@ Queried alongside Semantic Scholar so a paper it does not know, or references it
 | Setting | Description | Default |
 |---|---|---|
 | **OpenAlex** | Query OpenAlex for metadata and citations | On |
-| **CrossRef** | Query Crossref for publisher metadata; references only, and only where the publisher deposited them | On |
+| **CrossRef** | Query Crossref for publisher metadata; references only, and only where the publisher deposited them. Also the only source of the order a paper cites its references, which *Expand paper* can sort by | On |
 | **Email for polite access** | Sent to OpenAlex and Crossref, which grant better rate limits to identified callers. Recommended | |
 
 ### Canvas
@@ -329,6 +329,7 @@ The **Zotero local API** on `localhost:23119` reads collections and items, needi
 - A first run over a large collection takes minutes without a Semantic Scholar API key. See [Rate limits](#rate-limits).
 - Only arXiv is configured as a PDF source, so *Download* and *Write summary* cannot reach a paper that has no arXiv version. See [Download](#download).
 - Finding the arXiv preprint behind a publisher DOI costs a rate-limited request or two per paper, so a batch of papers with no recorded arXiv ID takes noticeably longer than one where the IDs are known.
+- Sorting *Expand paper* by order in the paper needs the paper to have a DOI, the **CrossRef** setting on, and a publisher that deposited its reference list. Each Crossref entry is matched to a paper by its title as well as its DOI, so entries without a DOI still get a position, and an entry whose deposited DOI belongs to a different paper is placed on the paper its text names. Entries that give neither a DOI nor a title (some cite only a conference name) leave their paper without a position, and those papers and all citing works go last. Results cached by an earlier version carry no positions; run **Papers: expand paper (force refresh)** once for that paper.
 - *Recommend papers* drops any suggestion no citation source can identify, so a genuinely obscure paper the model knows about may still be lost.
 - Live progress during a recommendation run needs the Claude CLI; the API providers report elapsed time alone.
 

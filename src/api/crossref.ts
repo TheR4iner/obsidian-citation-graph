@@ -5,6 +5,28 @@ import { RateLimiter } from "./rate-limit";
 
 const BASE = "https://api.crossref.org";
 
+/** One entry of a paper's reference list. */
+export interface CrossRefReference {
+  /** The cited work, when the entry names a DOI. */
+  paper: S2Paper | null;
+  /** The entry's deposited title and citation text, for matching by title. */
+  text: string;
+}
+
+/** The cited works that have a DOI, in bibliography order. */
+export function papersIn(references: CrossRefReference[]): S2Paper[] {
+  return references.flatMap((ref) => (ref.paper ? [ref.paper] : []));
+}
+
+/**
+ * A DOI written into a free-text citation, typically inside a publisher URL
+ * such as `https://link.springer.com/article/10.1007/...`.
+ */
+function doiInText(text: string | null): string | null {
+  const match = text?.match(/\b10\.\d{4,9}\/[^\s?#]+/);
+  return match ? match[0].replace(/[.,;)\]]+$/, "") : null;
+}
+
 /** Rate-limited CrossRef API client (references only, no public citation API) */
 export class CrossRefClient {
   /** 200ms between requests */
@@ -18,15 +40,22 @@ export class CrossRefClient {
   }
 
   /**
-   * Get references (works cited BY this paper) from CrossRef metadata.
-   * Only returns entries where the publisher deposited a DOI for the reference.
+   * The paper's reference list as the publisher deposited it, in bibliography
+   * order, including the entries that carry no DOI.
    */
-  async getReferencesForDoi(doi: string): Promise<S2Paper[]> {
+  async getReferenceList(doi: string): Promise<CrossRefReference[]> {
     const message = await this.fetchWork(doi);
     if (!message) return [];
-    return asRecordArray(message.reference)
-      .filter((ref) => asString(ref.DOI) !== null)
-      .map((ref) => mapCrossRefToS2Paper(ref));
+    return asRecordArray(message.reference).map((ref) => {
+      const refDoi = asString(ref.DOI) ?? doiInText(asString(ref.unstructured));
+      return {
+        paper: refDoi ? mapCrossRefToS2Paper(ref, refDoi) : null,
+        text: [ref["article-title"], ref["volume-title"], ref.unstructured]
+          .map(asString)
+          .filter((part): part is string => part !== null)
+          .join(" "),
+      };
+    });
   }
 
   /**
@@ -104,8 +133,7 @@ function mapCrossRefWorkToS2Paper(work: Record<string, unknown>, doi: string): S
 }
 
 /** Convert a CrossRef reference entry to S2Paper format */
-function mapCrossRefToS2Paper(ref: Record<string, unknown>): S2Paper {
-  const doi = asString(ref.DOI) ?? "";
+function mapCrossRefToS2Paper(ref: Record<string, unknown>, doi: string): S2Paper {
   // CrossRef reference entries have limited metadata
   const title =
     asString(ref["article-title"]) ??

@@ -62,7 +62,7 @@ const makeClients = (sources: FakeSources): ResolverClients => {
     },
     crossref: {
       getMetadataForDoi: async () => null,
-      getReferencesForDoi: async () => [],
+      getReferenceList: async () => [],
     },
     arxiv: { getMetadata: async () => null },
   };

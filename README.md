@@ -7,7 +7,7 @@ Turn your literature into a citation graph on an Obsidian canvas: papers as node
 ## Features
 
 - **Build a canvas** from a Zotero collection or tag, or add papers one at a time by DOI or arXiv ID. Each paper gets a literature note.
-- **Grow it** with any paper's references and citing works, filtered by year and keyword and sorted by citation count.
+- **Grow it** with any paper's references and citing works, filtered by year and keyword, and sorted by citations, year, title or the order the paper cites them.
 - **Track your reading**: every paper shows its status (to read, reading, read, abandoned) as a coloured border.
 - **Download PDFs** from arXiv into a vault folder.
 - **Summarize papers** with an LLM, written straight into the note.
