@@ -10,13 +10,19 @@
 - `onload` registers a permanent listener that writes each wait to `citation-graph.log` via `logOnly`, so the log shows why a command stalled.
 - `withS2Progress(progress, fn)` in `main.ts` shows the wait as the hint on a command's `ProgressNotice` for the duration of `fn`. Used by add-by-DOI, expand paper (uncached fetch), resolve missing edges, and recommendation verification.
 - `src/api/semantic-scholar.test.ts` pins the overlapping-listener case.
+- `fetchRefsAndCitations` runs each source through `fromSource`, which logs a thrown error and flags the source in `MultiSourceResult.failed` (display names). Expand paper shows what the other sources found, says the list may be incomplete, and skips the cache; resolve missing edges uses the partial list for that run, skips the cache and counts the paper as incomplete in its closing notice.
 
 ## Open questions
 
+- `getPaperWithRefs` maps network and 5xx errors to null, the same as a 404, so such a result is still cached as complete.
 - When S2 exhausts its retries, `resolvePaperWithRefs` throws instead of falling back to OpenAlex/arXiv/CrossRef for metadata. Falling back would add the paper without S2 edges instead of failing after a minute.
 - A 429 happened with an API key configured; unclear whether that was the key's own 1 req/s allowance or S2-side throttling.
 
 ## History
+
+### 2026-10-07
+
+An exhausted S2 rate limit inside `fetchRefsAndCitations` was caught and turned into an empty S2 result, and the OpenAlex+Crossref remainder was cached as if complete, so every later expand of that paper lacked the S2-only references until a force refresh. Reproduced live on `10.1038/s42005-023-01233-w`: 35 references instead of 45. Fixed with the `failed` field above.
 
 ### 2026-09-24
 

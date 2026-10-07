@@ -898,11 +898,18 @@ export default class CitationGraphPlugin extends Plugin {
         if (multiResult) {
           references = multiResult.references;
           citations = multiResult.citations;
-          this.s2Cache.setMerged(
-            externalId, doi, arxivId,
-            references, citations, multiResult.sources,
-          );
-          await this.s2Cache.save();
+          if (multiResult.failed.length > 0) {
+            logNotice(
+              `Could not reach ${multiResult.failed.join(" and ")}, so this list may be missing papers. ` +
+                "It was not cached; expand again later for the full list."
+            );
+          } else {
+            this.s2Cache.setMerged(
+              externalId, doi, arxivId,
+              references, citations, multiResult.sources,
+            );
+            await this.s2Cache.save();
+          }
         }
       }
 
@@ -1299,6 +1306,7 @@ export default class CitationGraphPlugin extends Plugin {
       const citationEdges: CitationEdge[] = [];
       const unidentified: string[] = [];
       const unresolved: string[] = [];
+      const incomplete: string[] = [];
       let fetched = 0;
       let fromCache = 0;
 
@@ -1337,20 +1345,23 @@ export default class CitationGraphPlugin extends Plugin {
             )
           );
           if (!result) {
-            // Every source came back empty. Usually the paper is too new or too
-            // obscure to be indexed, but an exhausted Semantic Scholar rate
-            // limit looks the same from here, which is why the count is
-            // reported rather than passed over.
+            // Every source answered and none had data: usually the paper is
+            // too new or too obscure to be indexed. A source that failed
+            // instead comes back as an incomplete result.
             unresolved.push(paper.title || paper.id);
             continue;
           }
           references = result.references;
           citations = result.citations;
-          this.s2Cache.setMerged(
-            cacheKey, paper.doi, paper.arxiv,
-            references, citations, result.sources,
-          );
-          fetched++;
+          if (result.failed.length > 0) {
+            incomplete.push(`${paper.title || paper.id} (${result.failed.join(", ")} failed)`);
+          } else {
+            this.s2Cache.setMerged(
+              cacheKey, paper.doi, paper.arxiv,
+              references, citations, result.sources,
+            );
+            fetched++;
+          }
         }
 
         citationEdges.push(
@@ -1390,6 +1401,10 @@ export default class CitationGraphPlugin extends Plugin {
       if (unresolved.length > 0) {
         detail.push(`${unresolved.length} with no citation data`);
         logOnly(`No citation data resolved for: ${unresolved.join("; ")}`);
+      }
+      if (incomplete.length > 0) {
+        detail.push(`${incomplete.length} incomplete because a source could not be reached`);
+        logOnly(`Citation data incomplete, not cached: ${incomplete.join("; ")}`);
       }
       if (unidentified.length > 0) {
         detail.push(`${unidentified.length} without an identifier`);
