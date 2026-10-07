@@ -4,6 +4,42 @@ import { PaperPickerModal } from "./paper-picker";
 import type { PaperChoice } from "./paper-picker";
 
 export type FilterMode = "both" | "references" | "citations";
+export type SortKey = "citations" | "year" | "title" | "paper";
+export type SortDirection = "asc" | "desc";
+
+const SORT_OPTIONS: Record<
+  SortKey,
+  { label: string; defaultDirection: SortDirection; value: (p: S2Paper) => number | string | null | undefined }
+> = {
+  citations: { label: "Citations", defaultDirection: "desc", value: (p) => p.citationCount },
+  year: { label: "Year", defaultDirection: "desc", value: (p) => p.year },
+  title: { label: "Title", defaultDirection: "asc", value: (p) => p.title || null },
+  paper: { label: "Order in paper", defaultDirection: "asc", value: (p) => p.referenceIndex },
+};
+
+function isSortKey(value: string): value is SortKey {
+  return Object.hasOwn(SORT_OPTIONS, value);
+}
+
+/** Sort in place by one key; papers missing that value go last in either direction. */
+export function sortChoices(
+  choices: PaperChoice[],
+  key: SortKey,
+  direction: SortDirection
+): void {
+  const valueOf = SORT_OPTIONS[key].value;
+  const sign = direction === "asc" ? 1 : -1;
+  choices.sort((a, b) => {
+    const va = valueOf(a.paper);
+    const vb = valueOf(b.paper);
+    if (va == null || vb == null) return (va == null ? 1 : 0) - (vb == null ? 1 : 0);
+    const order =
+      typeof va === "string" && typeof vb === "string"
+        ? va.localeCompare(vb, undefined, { sensitivity: "base", numeric: true })
+        : Number(va) - Number(vb);
+    return sign * order;
+  });
+}
 
 export interface ExpandPickerResult {
   selected: S2Paper[];
@@ -16,12 +52,14 @@ interface ExpandChoice extends PaperChoice {
 
 /**
  * Modal for selecting papers to add during Expand mode.
- * Shows checkboxes with paper metadata, sorted by citation count, plus a
- * cited/citing filter. Papers can be individually banned (marked
- * uninteresting) via a button.
+ * Shows checkboxes with paper metadata, sortable by citations, year, title or
+ * position in the paper's reference list, plus a cited/citing filter. Papers
+ * can be individually banned (marked uninteresting) via a button.
  */
 export class ExpandPickerModal extends PaperPickerModal<ExpandChoice> {
   private filterMode: FilterMode = "both";
+  private sortKey: SortKey = "citations";
+  private sortDirection: SortDirection = SORT_OPTIONS.citations.defaultDirection;
 
   constructor(
     app: App,
@@ -63,10 +101,7 @@ export class ExpandPickerModal extends PaperPickerModal<ExpandChoice> {
       });
     }
 
-    // Sort by citation count descending
-    this.choices.sort(
-      (a, b) => (b.paper.citationCount || 0) - (a.paper.citationCount || 0)
-    );
+    sortChoices(this.choices, this.sortKey, this.sortDirection);
   }
 
   protected getTitle(): string {
@@ -98,6 +133,45 @@ export class ExpandPickerModal extends PaperPickerModal<ExpandChoice> {
         this.refresh();
       });
     }
+
+    this.renderSortControls(container);
+  }
+
+  private renderSortControls(container: HTMLElement): void {
+    const row = container.createDiv("citation-graph-sort-row");
+    row.createSpan({ text: "Sort by:", cls: "citation-graph-sort-label" });
+
+    const select = row.createEl("select", { cls: "dropdown" });
+    const hasPaperOrder = this.choices.some((c) => c.paper.referenceIndex != null);
+    for (const [key, option] of Object.entries(SORT_OPTIONS)) {
+      const el = select.createEl("option", { value: key, text: option.label });
+      if (key === "paper" && !hasPaperOrder) {
+        el.disabled = true;
+        el.text += " (not available)";
+      }
+    }
+    select.value = this.sortKey;
+
+    const directionBtn = row.createEl("button", { cls: "citation-graph-sort-direction" });
+    const showDirection = () =>
+      directionBtn.setText(this.sortDirection === "asc" ? "Ascending" : "Descending");
+    showDirection();
+
+    const apply = () => {
+      showDirection();
+      sortChoices(this.choices, this.sortKey, this.sortDirection);
+      this.refresh();
+    };
+    select.addEventListener("change", () => {
+      if (!isSortKey(select.value)) return;
+      this.sortKey = select.value;
+      this.sortDirection = SORT_OPTIONS[this.sortKey].defaultDirection;
+      apply();
+    });
+    directionBtn.addEventListener("click", () => {
+      this.sortDirection = this.sortDirection === "asc" ? "desc" : "asc";
+      apply();
+    });
   }
 
   protected passesExtraFilter(choice: ExpandChoice): boolean {

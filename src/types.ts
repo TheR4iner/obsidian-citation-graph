@@ -355,6 +355,8 @@ export interface S2Paper {
 	authors: Array<{ name: string }>;
 	abstract: string | null;
 	citationCount: number | null;
+	/** Zero-based position in the citing paper's reference list; only CrossRef reports it. */
+	referenceIndex?: number;
 	references?: S2Paper[];
 	citations?: S2Paper[];
 }

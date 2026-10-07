@@ -284,5 +284,6 @@ function mergePapers(a: S2Paper, b: S2Paper): S2Paper {
     authors: primary.authors.length > 0 ? primary.authors : secondary.authors,
     abstract: primary.abstract ?? secondary.abstract,
     citationCount: primary.citationCount ?? secondary.citationCount,
+    referenceIndex: primary.referenceIndex ?? secondary.referenceIndex,
   };
 }
