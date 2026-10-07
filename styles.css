@@ -183,6 +183,18 @@
   color: var(--text-on-accent);
 }
 
+.citation-graph-sort-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.citation-graph-sort-label {
+  color: var(--text-muted);
+  font-size: 0.85em;
+}
+
 .citation-graph-search-row {
   margin-bottom: 8px;
 }

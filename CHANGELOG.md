@@ -6,6 +6,10 @@ Each released version here is also the body of the matching [GitHub release](htt
 
 ## [Unreleased]
 
+### Added
+
+- The *Expand paper* window can sort its list by citation count, year, title, or the order the paper cites its references, each ascending or descending. The order in the paper comes from Crossref, so it is available for papers with a DOI whose publisher deposited a reference list; for a paper expanded before this version, run *Papers: expand paper (force refresh)* once to fetch it.
+
 ## [0.7.2] - 2026-10-07
 
 ### Changed

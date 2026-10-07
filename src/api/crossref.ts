@@ -24,9 +24,10 @@ export class CrossRefClient {
   async getReferencesForDoi(doi: string): Promise<S2Paper[]> {
     const message = await this.fetchWork(doi);
     if (!message) return [];
-    return asRecordArray(message.reference)
-      .filter((ref) => asString(ref.DOI) !== null)
-      .map((ref) => mapCrossRefToS2Paper(ref));
+    // Index before filtering, so positions match the paper's own numbering.
+    return asRecordArray(message.reference).flatMap((ref, index) =>
+      asString(ref.DOI) === null ? [] : [{ ...mapCrossRefToS2Paper(ref), referenceIndex: index }]
+    );
   }
 
   /**
