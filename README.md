@@ -77,10 +77,11 @@ A filename that would leave its folder is refused before anything is written. Th
 
 Inside your vault, the plugin reads the list of files to find literature notes by their identifiers and to offer you other canvases. It reads and writes the notes and canvases it manages, and leaves the rest alone.
 
-**A local process.** If you choose the *Claude CLI* provider, *Write summary* and *Recommend papers* run the `claude` binary already installed on your machine. Nothing is downloaded or installed for you, ever. It is the only program the plugin runs, it runs only when you start one of those two commands, and it is constrained three ways:
+**A local process.** If you choose the *Claude CLI* provider, *Write summary* and *Recommend papers* run the `claude` binary already installed on your machine. Nothing is downloaded or installed for you, ever. It is the only program the plugin runs, it runs only when you start one of those two commands, and it is constrained four ways:
 
 - **No shell.** The binary is launched directly with an argument list, so nothing in a prompt or a paper title can become a command. The configured path must be an absolute path or the bare name `claude`; when it is blank, `~/.local/bin` (where the official installer puts it) is searched before the rest of `PATH`.
 - **A curated environment.** A child process normally inherits every variable in the one that started it, which here would hand a third-party binary every secret you have exported: your Zotero key, your OpenAI key, whatever else is in the shell Obsidian was launched from. It is given what it needs to run and find its own configuration (`PATH`, `HOME`, the temporary directory, `ANTHROPIC_*` and `CLAUDE_*`) and nothing else.
+- **Only the tools the command needs.** A PDF is text from a stranger and can carry instructions aimed at the model, so the run is given no shell, no editing tools and no MCP servers. *Write summary* gets one tool, reading files, and starts in the PDF's folder; Claude Code refuses reads outside that folder in this mode, which a test with a planted instruction confirmed. *Recommend papers* gets web search and fetch when *Search the web* is on, and nothing otherwise. Your own Claude Code settings, permission rules and hooks are not loaded for these runs.
 - **A time limit.** The run is capped, so a hung CLI cannot sit there indefinitely.
 
 The CLI reads the PDF itself, from its path in your vault folder. Obsidian's plugin directory flags any plugin that can run a program as *Shell execution*, and this provider is why Citation Graph carries that flag. It is kept on purpose: it bills summaries and recommendations to your Claude subscription instead of per call to an API key, and it is the only provider that reports what the model is doing while a long recommendation run is in progress. If you would rather the plugin never run a program, pick one of the API providers; the CLI is then never started.
@@ -91,7 +92,7 @@ The CLI reads the PDF itself, from its path in your vault folder. Obsidian's plu
 
 Not yet in the community marketplace, so install by hand:
 
-1. Download `main.js`, `manifest.json` and `styles.css` from the [latest release](https://github.com/TheR4iner/obsidian-citation-graph/releases).
+1. Download `main.js`, `manifest.json` and `styles.css` from the [latest release](https://github.com/TheR4iner/obsidian-citation-graph/releases). Each file carries a build attestation, so with the GitHub CLI you can confirm it was built from this repository by its release workflow: `gh attestation verify main.js --repo TheR4iner/obsidian-citation-graph`.
 2. Put all three in `.obsidian/plugins/citation-graph/` inside your vault.
 3. Enable **Citation Graph** under Settings, Community Plugins.
 

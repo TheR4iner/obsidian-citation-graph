@@ -533,6 +533,61 @@ export function cliSearchPath(inherited: string | undefined, home: string): stri
 }
 
 /**
+ * The arguments and working directory for one CLI run. Exported for testing.
+ *
+ * The CLI is an agent with tools, and a paper's PDF is text from a stranger:
+ * a document can carry instructions aimed at the model. So the run gets only
+ * the tools the request needs, and nothing of the user's own setup:
+ *
+ *   - `--tools` names the whole tool set: Read when there is a PDF to read,
+ *     WebSearch and WebFetch when the request asks for search, nothing else.
+ *     No shell, no editing, no other file tools.
+ *   - The working directory is the PDF's folder (a temporary directory when
+ *     there is none). Claude Code lets Read into its working directory without
+ *     asking and denies anything outside it in print mode, so the PDF is
+ *     readable and the rest of the disk is not.
+ *   - `--setting-sources ""` ignores the user's Claude Code settings, whose
+ *     permission rules or hooks could otherwise widen what the run may do.
+ *     `--strict-mcp-config` with no config loads no MCP servers.
+ *
+ * The PDF's path goes into the prompt. A path after the prompt is not an
+ * attachment: the CLI ignores extra arguments, and the model never sees them.
+ */
+export function cliInvocation(
+	request: LlmRequest,
+	model: string,
+	tmpDir: string = os.tmpdir(),
+): { args: string[]; cwd: string } {
+	const tools = [
+		...(request.pdf ? ["Read"] : []),
+		...(request.webSearch ? ["WebSearch", "WebFetch"] : []),
+	];
+	const args = [
+		"-p", "--model", model, "--output-format", "stream-json", "--verbose",
+		"--tools", tools.join(","),
+		"--strict-mcp-config",
+		"--setting-sources", "",
+	];
+	// In print mode a tool that needs permission is auto-denied rather than
+	// prompted for, so search has to be allowed explicitly or the CLI answers
+	// from training data alone.
+	if (request.webSearch) args.push("--allowedTools", "WebSearch,WebFetch");
+
+	let prompt = request.prompt;
+	if (request.pdf) {
+		prompt +=
+			`\n\nThe paper's PDF is at: ${request.pdf.fullPath}\n` +
+			"Read it with the Read tool before answering, and base the answer on its content.";
+	}
+	// The tool options are variadic: without this separator they swallow the
+	// prompt as another value, and the CLI then waits on stdin for a prompt
+	// that never comes.
+	args.push("--", prompt);
+
+	return { args, cwd: request.pdf ? path.dirname(request.pdf.fullPath) : tmpDir };
+}
+
+/**
  * Turn one streamed CLI event into a line for the progress notice.
  *
  * The events are read as `unknown` and narrowed field by field. They come from
@@ -586,16 +641,7 @@ function callClaudeCli(
 	// Model setting is blank.
 	const model = effectiveModel(settings);
 
-	const args = ["-p", "--model", model, "--output-format", "stream-json", "--verbose"];
-	// In print mode a tool the user has not allowed is auto-denied rather than
-	// prompted for, so search has to be named explicitly or the CLI answers
-	// from training data alone.
-	if (request.webSearch) args.push("--allowedTools", "WebSearch,WebFetch");
-	// --allowedTools is variadic: without this separator it swallows the prompt
-	// as another tool name, and the CLI then waits on stdin for a prompt that
-	// never comes.
-	args.push("--", request.prompt);
-	if (request.pdf) args.push(request.pdf.fullPath);
+	const { args, cwd } = cliInvocation(request, model);
 
 	return new Promise<LlmResponse>((resolve, reject) => {
 		const child = child_process.spawn(executable, args, {
@@ -605,6 +651,7 @@ function callClaudeCli(
 			// which contain arbitrary text from remote sources. Passed as an
 			// array to a shell-less spawn they are inert.
 			shell: false,
+			cwd,
 			env: { ...cliEnvironment(), PATH: cliSearchPath(process.env.PATH, os.homedir()) },
 			windowsHide: true,
 		});
