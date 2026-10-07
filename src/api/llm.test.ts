@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   cliEnvironment,
+  cliInvocation,
   cliSearchPath,
   describeCliEvent,
   defaultModelForProvider,
@@ -159,6 +160,50 @@ describe("cliEnvironment", () => {
     expect(cliEnvironment({ PATH: undefined, HOME: "/home/someone" })).toEqual({
       HOME: "/home/someone",
     });
+  });
+});
+
+describe("cliInvocation", () => {
+  const pdf = {
+    name: "A (B) (2020).pdf",
+    fullPath: "/vault/Papers/PDFs/A (B) (2020).pdf",
+    size: async () => 0,
+    read: async () => new ArrayBuffer(0),
+  };
+  const valueOf = (args: string[], flag: string) => args[args.indexOf(flag) + 1];
+
+  // The CLI ignores a path given after the prompt; the model has to be told.
+  it("puts the PDF path in the prompt, not after it", () => {
+    const { args } = cliInvocation({ prompt: "Summarize.", pdf }, "m", "/tmp");
+    const prompt = args[args.length - 1];
+    expect(args[args.length - 2]).toBe("--");
+    expect(prompt).toContain("Summarize.");
+    expect(prompt).toContain(pdf.fullPath);
+  });
+
+  it("allows only Read when there is a PDF, and starts in its folder", () => {
+    const { args, cwd } = cliInvocation({ prompt: "x", pdf }, "m", "/tmp");
+    expect(valueOf(args, "--tools")).toBe("Read");
+    expect(cwd).toBe("/vault/Papers/PDFs");
+    expect(args).not.toContain("--allowedTools");
+  });
+
+  it("gives a request with no PDF and no search no tools at all", () => {
+    const { args, cwd } = cliInvocation({ prompt: "x" }, "m", "/tmp");
+    expect(valueOf(args, "--tools")).toBe("");
+    expect(cwd).toBe("/tmp");
+  });
+
+  it("adds and allows the web tools only when search is asked for", () => {
+    const { args } = cliInvocation({ prompt: "x", webSearch: true }, "m", "/tmp");
+    expect(valueOf(args, "--tools")).toBe("WebSearch,WebFetch");
+    expect(valueOf(args, "--allowedTools")).toBe("WebSearch,WebFetch");
+  });
+
+  it("ignores the user's own settings and MCP servers", () => {
+    const { args } = cliInvocation({ prompt: "x" }, "m", "/tmp");
+    expect(valueOf(args, "--setting-sources")).toBe("");
+    expect(args).toContain("--strict-mcp-config");
   });
 });
 
