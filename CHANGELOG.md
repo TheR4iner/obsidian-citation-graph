@@ -6,6 +6,8 @@ Each released version here is also the body of the matching [GitHub release](htt
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-10-07
+
 ### Added
 
 - The *Expand paper* window can sort its list by citation count, year, title, or the order the paper cites its references, each ascending or descending. The order in the paper comes from Crossref, so it is available for papers with a DOI whose publisher deposited a reference list; for a paper expanded before this version, run *Papers: expand paper (force refresh)* once to fetch it.
@@ -173,7 +175,8 @@ First public release.
 - **Sync canvas to Zotero**, **Send papers to canvas**, **Relayout canvas**, **Delete paper**, and **Clear Semantic Scholar cache**.
 - Settings for the collections folder, the Zotero and Semantic Scholar API keys, node size, the five status colours, and the full LLM configuration.
 
-[Unreleased]: https://github.com/TheR4iner/obsidian-citation-graph/compare/0.7.2...HEAD
+[Unreleased]: https://github.com/TheR4iner/obsidian-citation-graph/compare/0.8.0...HEAD
+[0.8.0]: https://github.com/TheR4iner/obsidian-citation-graph/compare/0.7.2...0.8.0
 [0.7.2]: https://github.com/TheR4iner/obsidian-citation-graph/compare/0.7.1...0.7.2
 [0.7.1]: https://github.com/TheR4iner/obsidian-citation-graph/compare/0.7.0...0.7.1
 [0.7.0]: https://github.com/TheR4iner/obsidian-citation-graph/compare/0.6.2...0.7.0
