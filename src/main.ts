@@ -77,6 +77,8 @@ import {
   layoutPapers,
   layoutNewPapers,
   placeInNewGroup,
+  isUpdateGroup,
+  UPDATE_GROUP_PREFIX,
 } from "./canvas/layout";
 import { S2RefCache } from "./api/s2-cache";
 import * as path from "path";
@@ -738,7 +740,7 @@ export default class CitationGraphPlugin extends Plugin {
           canvas.nodes,
           toPlace,
           {
-            id: `cg-zotero-update-${Date.now().toString(36)}`,
+            id: `${UPDATE_GROUP_PREFIX}${Date.now().toString(36)}`,
             label: `New from Zotero (${moment().format("YYYY-MM-DD")})`,
           },
           { nodeWidth: this.settings.nodeWidth, nodeHeight: this.settings.nodeHeight }
@@ -2856,12 +2858,14 @@ export default class CitationGraphPlugin extends Plugin {
       // node where it is.
       await this.updateCanvas<CanvasMeta>(activeFile, (canvas) => {
         // Tag groups from "Group papers by tag" would no longer frame anything.
-        canvas.nodes = canvas.nodes.filter((node) => !isTagGroup(node)).map((node) => {
-          const updated = newLayoutById.get(node.id);
-          return updated
-            ? { ...node, x: updated.x, y: updated.y, width: updated.width, height: updated.height }
-            : node;
-        });
+        canvas.nodes = canvas.nodes
+          .filter((node) => !isTagGroup(node) && !isUpdateGroup(node))
+          .map((node) => {
+            const updated = newLayoutById.get(node.id);
+            return updated
+              ? { ...node, x: updated.x, y: updated.y, width: updated.width, height: updated.height }
+              : node;
+          });
         paintStatusColors(canvas.nodes, colors);
       });
       logNotice(`Relayouted ${papers.length} papers chronologically.`);

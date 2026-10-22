@@ -248,6 +248,13 @@ export function resolvePaperNodeId(
 	return paperNodeId(paper);
 }
 
+export const UPDATE_GROUP_PREFIX = "cg-zotero-update-";
+
+/** Whether a node is a group that *Update from collection* drew. */
+export function isUpdateGroup(node: CanvasNode): boolean {
+	return node.type === "group" && node.id.startsWith(UPDATE_GROUP_PREFIX);
+}
+
 const GROUP_GAP = 400;
 const GROUP_PADDING = 100;
 const CARD_GAP = 100;
