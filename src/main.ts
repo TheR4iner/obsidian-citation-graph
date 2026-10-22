@@ -8,6 +8,7 @@ import {
   FuzzySuggestModal,
   Modal,
   ButtonComponent,
+  moment,
   type WorkspaceLeaf,
 } from "obsidian";
 import { initLog, logNotice, logOnly } from "./log";
@@ -70,7 +71,13 @@ import {
   type TagLayoutResult,
 } from "./canvas/tag-layout";
 import { registerCanvasPaperMenu } from "./canvas/node-menu";
-import { hasPaperNode, resolvePaperNodeId, layoutPapers, layoutNewPapers } from "./canvas/layout";
+import {
+  hasPaperNode,
+  resolvePaperNodeId,
+  layoutPapers,
+  layoutNewPapers,
+  placeInNewGroup,
+} from "./canvas/layout";
 import { S2RefCache } from "./api/s2-cache";
 import * as path from "path";
 import { summarizePaper, effectiveModel, providerSupportsWebSearch } from "./api/llm";
@@ -276,6 +283,11 @@ export default class CitationGraphPlugin extends Plugin {
         () => this.resolveMissingEdges({ forceRefresh: true }),
       ],
       ["relayout-by-tag", "Canvas: group papers by tag", () => this.relayoutByTag()],
+      [
+        "update-from-collection",
+        "Canvas: update from collection",
+        () => this.updateFromCollection(),
+      ],
       ["sync-to-zotero", "Canvas: sync to Zotero", () => this.syncToZotero()],
       ["download-papers", "PDFs: download", () => this.downloadPapersFromCanvas()],
       ["link-zotero-pdfs", "PDFs: link from Zotero", () => this.linkZoteroPdfsOnCanvas()],
@@ -593,6 +605,176 @@ export default class CitationGraphPlugin extends Plugin {
     }
   }
 
+  // ─── Update from Collection ─────────────────────────────────
+
+  /**
+   * Bring the papers added to a canvas's source collection since it was
+   * created onto the canvas, without rebuilding it.
+   *
+   * Nothing already on the canvas moves or changes: the new cards go into one
+   * labelled group beside the current bounding box, and the only other change
+   * is the citation edges between them and the papers already there. Which
+   * papers count as new is decided again at write time, so a paper the user
+   * added by hand meanwhile is not placed twice.
+   */
+  private async updateFromCollection(): Promise<void> {
+    const progress = new ProgressNotice("Updating from Zotero");
+    try {
+      const activeFile = this.findActiveCanvas();
+      if (!activeFile) {
+        logNotice("Open a citation graph canvas first, then run this command.");
+        return;
+      }
+      const canvasData = await this.readCanvas<CanvasMeta>(activeFile);
+      const collectionKey = canvasData.citationGraphMeta?.zoteroCollectionKey;
+      if (!collectionKey) {
+        logNotice(
+          "This canvas was not created from a Zotero collection, so there is no collection to update from."
+        );
+        return;
+      }
+
+      // The canvas records only the collection key. Looking it up again finds
+      // the group library it lives in, and its current name.
+      progress.setStatus("Reading the Zotero collection");
+      const keys = resolveApiKeys(this.settings);
+      const zotero = new ZoteroClient(keys.zoteroApiKey, keys.zoteroUserId);
+      const collection = (await zotero.getCollections()).find((c) => c.key === collectionKey);
+      if (!collection) {
+        logNotice(
+          "The Zotero collection this canvas was created from was not found. Is Zotero running, and does the collection still exist?"
+        );
+        return;
+      }
+      const name = collection.data.name;
+      const items = await zotero.getCollectionItems(collectionKey, collection.data.groupId);
+
+      const existing = this.papersOnNodes(canvasData.nodes);
+      const existingIds = this.canvasPaperIds(existing);
+      const existingArxiv = new Set(existing.map((p) => p.arxiv).filter(Boolean));
+      const nodeIds = new Set(canvasData.nodes.map((n) => n.id));
+      const onCanvas = (paper: Paper): boolean =>
+        hasPaperNode(paper, nodeIds) ||
+        (!!paper.doi && existingIds.has(`doi:${paper.doi.toLowerCase()}`)) ||
+        (!!paper.arxiv && existingArxiv.has(paper.arxiv)) ||
+        (!!paper.semanticScholarId && existingIds.has(paper.semanticScholarId));
+
+      let withoutId = 0;
+      const candidates = new Map<string, Paper>();
+      for (const item of items) {
+        const paper = zoteroItemToPaper(item);
+        if (!paper) withoutId++;
+        else if (!onCanvas(paper)) candidates.set(paper.id, paper);
+      }
+      const skippedNote =
+        withoutId > 0 ? ` (${withoutId} without a DOI or arXiv ID skipped).` : ".";
+      if (candidates.size === 0) {
+        logNotice(`The canvas already has every paper in "${name}"${skippedNote}`);
+        return;
+      }
+
+      // Existing papers go into the same batch so that edges in both
+      // directions come out of one response: a new paper's references give
+      // new -> existing, an existing paper's give existing -> new.
+      progress.setStatus(`Resolving ${candidates.size} new papers on Semantic Scholar`);
+      const batchIds = [...candidates.values(), ...existing]
+        .map(s2BatchId)
+        .filter((id): id is string => id !== null);
+      const s2Papers = await this.withS2Progress(progress, () =>
+        this.s2Client.getPaperBatch(batchIds, undefined, true)
+      );
+
+      let unresolved = 0;
+      const newPapers: Paper[] = [];
+      for (const paper of candidates.values()) {
+        if (!enrichFromBatch(paper, s2Papers)) unresolved++;
+        // A preprint and its published version carry different DOIs but are
+        // one S2 paper, and one of them may already be on the canvas.
+        else if (onCanvas(paper)) continue;
+        newPapers.push(paper);
+      }
+      if (newPapers.length === 0) {
+        logNotice(`The canvas already has every paper in "${name}"${skippedNote}`);
+        return;
+      }
+
+      const s2IdToPaperId = new Map<string, string>();
+      for (const paper of existing) {
+        const s2 = s2Papers.get(
+          paper.doi?.toLowerCase() || paper.arxiv || paper.semanticScholarId || ""
+        );
+        if (s2) s2IdToPaperId.set(s2.paperId, paper.id);
+      }
+      for (const paper of newPapers) {
+        if (paper.semanticScholarId) s2IdToPaperId.set(paper.semanticScholarId, paper.id);
+      }
+      const newIds = new Set(newPapers.map((p) => p.id));
+      const edges: CitationEdge[] = [];
+      for (const e of SemanticScholarClient.buildCitationEdgesFromBatch(s2Papers)) {
+        const fromId = s2IdToPaperId.get(e.fromId);
+        const toId = s2IdToPaperId.get(e.toId);
+        if (fromId && toId && (newIds.has(fromId) || newIds.has(toId))) {
+          edges.push({ fromId, toId });
+        }
+      }
+
+      progress.setStatus(`Creating ${newPapers.length} literature notes`);
+      const noteFolder =
+        activeFile.parent?.path || normalizePath(this.settings.collectionsFolder);
+      await new LiteratureNoteManager(this.app, noteFolder).createNotes(newPapers);
+      // Only the new notes: existing nodes keep whatever colour they have.
+      const colors = await this.resolveStatusColors(
+        newPapers.map((p) => p.notePath).filter((p): p is string => !!p)
+      );
+
+      const paperIndex = this.indexPapers([...existing, ...newPapers]);
+      let added = 0;
+      let edgeCount = 0;
+      await this.updateCanvas<CanvasMeta>(activeFile, (canvas) => {
+        const ids = new Set(canvas.nodes.map((n) => n.id));
+        const toPlace = newPapers.filter((p) => !hasPaperNode(p, ids));
+        if (toPlace.length === 0) return false;
+        const placed = placeInNewGroup(
+          canvas.nodes,
+          toPlace,
+          {
+            id: `cg-zotero-update-${Date.now().toString(36)}`,
+            label: `New from Zotero (${moment().format("YYYY-MM-DD")})`,
+          },
+          { nodeWidth: this.settings.nodeWidth, nodeHeight: this.settings.nodeHeight }
+        );
+        paintStatusColors(placed, colors);
+        const nodes = [...canvas.nodes, ...placed];
+        const addedEdges = resolveNewEdges(
+          canvas.edges,
+          new Set(nodes.map((n) => n.id)),
+          edges,
+          paperIndex
+        );
+        added = toPlace.length;
+        edgeCount = addedEdges.length;
+        return { ...canvas, nodes, edges: [...canvas.edges, ...addedEdges] };
+      });
+
+      progress.hide();
+      const detail: string[] = [];
+      if (unresolved > 0) {
+        detail.push(`${unresolved} not found on Semantic Scholar, added without citation edges`);
+      }
+      if (withoutId > 0) detail.push(`${withoutId} without a DOI or arXiv ID skipped`);
+      logNotice(
+        `Added ${added} paper${added === 1 ? "" : "s"} from "${name}" with ` +
+          `${edgeCount} citation edge${edgeCount === 1 ? "" : "s"}` +
+          (detail.length > 0 ? ` (${detail.join("; ")}).` : ".")
+      );
+    } catch (e) {
+      console.error("Citation Graph: Error updating canvas from collection", e);
+      logNotice(`Error: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      progress.hide();
+    }
+  }
+
   // ─── Create from Tag ────────────────────────────────────────
 
   private async createFromTag(): Promise<void> {
@@ -642,9 +824,8 @@ export default class CitationGraphPlugin extends Plugin {
 
       papers.set(paper.id, paper);
 
-      // Build S2-compatible ID
-      if (paper.doi) externalIds.push(`DOI:${paper.doi}`);
-      else if (paper.arxiv) externalIds.push(`ArXiv:${paper.arxiv}`);
+      const s2Id = s2BatchId(paper);
+      if (s2Id) externalIds.push(s2Id);
     }
 
     if (externalIds.length === 0) {
@@ -664,24 +845,7 @@ export default class CitationGraphPlugin extends Plugin {
       true,
     );
 
-    // Enrich our papers with S2 data
-    for (const paper of papers.values()) {
-      const s2Key = paper.doi
-        ? paper.doi.toLowerCase()
-        : paper.arxiv || "";
-      const s2Paper = s2Papers.get(s2Key);
-      if (s2Paper) {
-        paper.semanticScholarId = s2Paper.paperId;
-        if (!paper.arxiv && s2Paper.externalIds?.ArXiv)
-          paper.arxiv = s2Paper.externalIds.ArXiv;
-        if (!paper.doi && s2Paper.externalIds?.DOI)
-          paper.doi = s2Paper.externalIds.DOI;
-        if (!paper.year && s2Paper.year) paper.year = s2Paper.year;
-        if (s2Paper.citationCount != null)
-          paper.citationCount = s2Paper.citationCount;
-        if (s2Paper.abstract) paper.abstract = s2Paper.abstract;
-      }
-    }
+    for (const paper of papers.values()) enrichFromBatch(paper, s2Papers);
 
     // 3. Build citation edges from the batch response (no extra requests)
     const resolvedPapers = new Map<string, S2Paper>();
@@ -3410,6 +3574,29 @@ function zoteroItemToPaper(item: ZoteroItem): Paper | null {
     citationCount: null,
     notePath: null,
   };
+}
+
+/**
+ * Fill a Zotero-derived paper in from a `getPaperBatch` response, which is
+ * indexed by lowercased DOI and by arXiv ID. Returns whether S2 knew it.
+ */
+function enrichFromBatch(paper: Paper, s2Papers: Map<string, S2Paper>): boolean {
+  const s2Paper = s2Papers.get(paper.doi ? paper.doi.toLowerCase() : paper.arxiv || "");
+  if (!s2Paper) return false;
+  paper.semanticScholarId = s2Paper.paperId;
+  if (!paper.arxiv && s2Paper.externalIds?.ArXiv) paper.arxiv = s2Paper.externalIds.ArXiv;
+  if (!paper.doi && s2Paper.externalIds?.DOI) paper.doi = s2Paper.externalIds.DOI;
+  if (!paper.year && s2Paper.year) paper.year = s2Paper.year;
+  if (s2Paper.citationCount != null) paper.citationCount = s2Paper.citationCount;
+  if (s2Paper.abstract) paper.abstract = s2Paper.abstract;
+  return true;
+}
+
+/** The identifier `getPaperBatch` accepts for a paper, or null without one. */
+function s2BatchId(paper: Paper): string | null {
+  if (paper.doi) return `DOI:${paper.doi}`;
+  if (paper.arxiv) return `ArXiv:${paper.arxiv}`;
+  return paper.semanticScholarId;
 }
 
 function paperToZoteroItem(p: {
