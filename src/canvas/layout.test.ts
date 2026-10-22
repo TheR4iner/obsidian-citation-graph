@@ -5,6 +5,8 @@ import {
 	paperNodeId,
 	paperNodeIdCandidates,
 	placeInNewGroup,
+	isUpdateGroup,
+	UPDATE_GROUP_PREFIX,
 	resolvePaperNodeId,
 } from "./layout";
 import type { CanvasNode, Paper } from "../types";
@@ -185,5 +187,17 @@ describe("placeInNewGroup", () => {
 	it("starts at the origin on an empty canvas", () => {
 		const [g] = placeInNewGroup([], newOnes.slice(0, 1), group, size);
 		expect(g).toMatchObject({ x: 0, y: 0, width: 600, height: 500 });
+	});
+});
+
+describe("isUpdateGroup", () => {
+	const node = (id: string, type: CanvasNode["type"]): CanvasNode =>
+		({ id, type, x: 0, y: 0, width: 1, height: 1 });
+
+	it("recognises only groups carrying the update prefix", () => {
+		expect(isUpdateGroup(node(`${UPDATE_GROUP_PREFIX}x1`, "group"))).toBe(true);
+		expect(isUpdateGroup(node("cg-tag-0", "group"))).toBe(false);
+		expect(isUpdateGroup(node("mine", "group"))).toBe(false);
+		expect(isUpdateGroup(node(`${UPDATE_GROUP_PREFIX}x1`, "text"))).toBe(false);
 	});
 });

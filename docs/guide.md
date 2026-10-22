@@ -100,7 +100,7 @@ Only three of them work without a canvas open: *Create from collection*, *Create
 | **Canvas: create from collection** | Builds a canvas from a Zotero collection, into `<collections folder>/<collection name>/` |
 | **Canvas: update from collection** | Adds the papers that joined the canvas's Zotero collection since it was built, in a new group beside the canvas, without moving anything. See [Updating from the collection](#updating-from-the-collection) |
 | **Canvas: create from tag** | Builds a canvas from an intersection of Zotero tags, into a folder named after the tags |
-| **Canvas: relayout** | Re-sorts nodes chronologically, discarding manual positions and any tag groups |
+| **Canvas: relayout** | Re-sorts nodes chronologically, discarding manual positions, tag groups and *New from Zotero* groups |
 | **Canvas: group papers by tag** | Arranges papers into overlapping labelled groups, one per tag, discarding manual positions. See [Grouping by tag](#grouping-by-tag) |
 | **Canvas: resolve missing citation edges** | Re-checks every paper on the canvas and draws the edges it is missing; **(force refresh)** bypasses the local cache |
 | **Canvas: sync to Zotero** | Pushes the canvas's papers back to a Zotero collection |
@@ -153,7 +153,7 @@ The same paper in four of the five states, at the default colours. The fifth, *R
 A canvas made with *Create from collection* remembers its collection. After adding references to that collection in Zotero, **Update from collection** brings just the new ones onto the canvas, so a canvas you have rearranged and annotated never has to be rebuilt.
 
 - **Only papers not already on the canvas are added.** A paper counts as present when the canvas has a node for it or a literature note with the same DOI, arXiv ID or Semantic Scholar ID, so a paper you added by DOI or by expanding another one is not added twice. Removing a paper from the canvas and running the command again brings it back.
-- **Nothing on the canvas moves.** The new cards go into one group labelled *New from Zotero* with the date, placed to the right of everything else, in a grid ordered by year. Your cards, your own nodes, reading-status colours and tag groups are left exactly as they were; drag the new cards where you want them, or run *Group papers by tag* or *Relayout* if you want the whole canvas rearranged.
+- **Nothing on the canvas moves.** The new cards go into one group labelled *New from Zotero* with the date, placed to the right of everything else, in a grid ordered by year. Your cards, your own nodes, reading-status colours and tag groups are left exactly as they were; drag the new cards where you want them, or run *Group papers by tag* or *Relayout* if you want the whole canvas rearranged. Both remove the *New from Zotero* group, since its papers move out of it.
 - **Citation arrows are drawn** between the new papers and the ones already there, in both directions, and among the new papers themselves.
 - **Each new paper gets a literature note** in the canvas's folder, as on creation. A note that already exists for the paper is reused.
 

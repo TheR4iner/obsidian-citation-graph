@@ -7,6 +7,7 @@ import {
 	UNTAGGED_LABEL,
 } from "./tag-layout";
 import type { CanvasNode } from "../types";
+import { UPDATE_GROUP_PREFIX } from "./layout";
 
 const card = (id: string, x = 0, y = 0, extra: Partial<CanvasNode> = {}): CanvasNode => ({
 	id,
@@ -156,5 +157,20 @@ describe("layoutByTag", () => {
 	it("leaves a canvas with no papers alone", () => {
 		const extra = shared();
 		expect(layoutByTag(extra, new Map()).nodes).toEqual(extra);
+	});
+});
+
+describe("layoutByTag and other groups", () => {
+	const group = (id: string): CanvasNode => ({ id, type: "group", label: id, x: 5000, y: 0, width: 800, height: 1000 });
+
+	it("drops the group Update from collection drew, since its papers move out", () => {
+		const { result, byId } = run({ a: ["x"] }, [group(`${UPDATE_GROUP_PREFIX}abc`)]);
+		expect(byId.has(`${UPDATE_GROUP_PREFIX}abc`)).toBe(false);
+		expect(result.nodes.some((n) => n.id === "a")).toBe(true);
+	});
+
+	it("keeps a group the user drew", () => {
+		const { byId } = run({ a: ["x"] }, [group("mine")]);
+		expect(byId.get("mine")).toEqual(group("mine"));
 	});
 });

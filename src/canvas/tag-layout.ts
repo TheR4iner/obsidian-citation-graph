@@ -1,4 +1,5 @@
 import type { CanvasNode } from "../types";
+import { isUpdateGroup } from "./layout";
 
 export const TAG_GROUP_PREFIX = "cg-tag-";
 export const MAX_TAGS_PER_PAPER = 3;
@@ -68,7 +69,8 @@ export function layoutByTag(
 	const isPaper = (n: CanvasNode): boolean =>
 		n.type === "file" && !!n.file && tagOf.has(n.file);
 	const papers = nodes.filter(isPaper);
-	const kept = nodes.filter((n) => !isPaper(n) && !isTagGroup(n));
+	// The papers leave the group *Update from collection* put them in, so it goes too.
+	const kept = nodes.filter((n) => !isPaper(n) && !isTagGroup(n) && !isUpdateGroup(n));
 	if (papers.length === 0) return { nodes: kept, tooManyTags: [], undrawable: [] };
 
 	// Anchor on where the previous run drew its rectangles too, so a re-run
