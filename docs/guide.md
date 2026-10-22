@@ -111,7 +111,7 @@ Only three of them work without a canvas open: *Create from collection*, *Create
 | **Reading: set paper status** | Sets the selected papers to *to read*, *reading*, *read*, or *abandoned* |
 | **Reading: cycle reading status** | Advances the selection one step through *to read*, *reading*, *read*. Good on a hotkey |
 | **Reading: refresh reading status** | Repaints every paper on the canvas from its note |
-| **PDFs: download** | Fetches PDFs for papers on the canvas |
+| **PDFs: download** | Fetches PDFs for papers on the canvas and links each from its paper note |
 | **PDFs: write summary** | Writes an LLM summary into the note under `## Summary` |
 | **Maintenance: clear Semantic Scholar cache** | Drops cached reference data if you suspect it is stale |
 
@@ -175,6 +175,8 @@ The list lives in the canvas file, so it travels with the canvas. Review it, or 
 ### Download
 
 **Download** saves as `Title (FirstAuthor) (Year).pdf` in a folder of your vault, created if it does not exist. With exactly one paper selected and a download folder already known (the canvas's last one, or the *Default download folder* setting), it downloads straight away; otherwise it opens a picker where you choose the papers and the folder, with your vault's folders suggested as you type. Papers already in the folder are marked `downloaded` and left unchecked.
+
+**Each downloaded PDF is linked from its paper note**, as a `pdf` frontmatter property holding a wikilink such as `pdf: "[[Papers/PDFs/Title (Author) (Year).pdf]]"`, so the file opens from the note and Obsidian keeps the link current if you move or rename it. A `pdf` value already in the note is left as it is, so downloading again never adds a second link and never replaces one you set yourself. The same happens when *Write summary* downloads a missing PDF. Characters a wikilink cannot carry (`#`, `^`, `[`, `]`) are left out of the filename.
 
 Versions before 0.7.0 saved PDFs anywhere on disk. A stored folder that points inside the vault, even written as an absolute or `~` path, keeps working. One that points outside it is refused with a message: pick a vault folder and move the PDFs you already have into it.
 
@@ -317,6 +319,7 @@ doi: "10.48550/arXiv.1706.03762"
 arxiv: "1706.03762"
 citekey: "vaswani2017attention"
 semantic_scholar_id: "204e3073870fae3d05bcbc2f6a8e263d9b72e776"
+pdf: "[[Papers/PDFs/Attention Is All You Need (Ashish Vaswani) (2017).pdf]]"
 status: unread
 tags: []
 cssclasses:
@@ -326,6 +329,8 @@ cssclasses:
 ```
 
 The body carries a title heading, an author/year/DOI/arXiv block, a `## Summary` section written by *Write summary*, and a `## Notes` section for you.
+
+`pdf` is added once the paper's PDF has been downloaded; see [Download](#download).
 
 `status` holds one of `unread`, `reading`, `read` or `abandoned`, which the interface labels *To read*, *Reading*, *Read* and *Abandoned*. *Read + notes written* has no stored value: it is derived, from `read` plus content in the note's body.
 

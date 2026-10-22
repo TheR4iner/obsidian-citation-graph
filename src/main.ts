@@ -48,6 +48,7 @@ import { CollectionPickerModal } from "./modals/collection-picker";
 import { TagPickerModal } from "./modals/tag-picker";
 import { ExpandPickerModal } from "./modals/expand-picker";
 import { DownloadPickerModal, downloadPapers, buildPaperFilename } from "./modals/download-picker";
+import type { DownloadOutcome } from "./modals/download-picker";
 import { estimatePdfPages, fileInFolder, vaultFolder } from "./paper-files";
 import { SendPickerModal } from "./modals/send-picker";
 import { RecommendPromptModal } from "./modals/recommend-prompt-modal";
@@ -56,7 +57,7 @@ import { StatusPickerModal } from "./modals/status-picker";
 import { PromiseModal } from "./modals/promise-modal";
 import { askChoice } from "./modals/choice-modal";
 import type { BannedPaper } from "./types";
-import { LiteratureNoteManager, readFrontmatterArxiv } from "./notes/literature";
+import { LiteratureNoteManager, linkPdf, readFrontmatterArxiv } from "./notes/literature";
 import { hasSummarySection, insertSummaryText } from "./notes/summary-text";
 import { buildCanvas, expandCanvas, resolveNewEdges } from "./canvas/builder";
 import { parseCanvasData } from "./canvas/parse";
@@ -440,27 +441,30 @@ export default class CitationGraphPlugin extends Plugin {
   }
 
   /**
-   * Write arXiv IDs discovered during a download back into their notes, so the
-   * next run finds them recorded and skips the lookup.
+   * Write what a download learned back into the paper notes: arXiv IDs a
+   * lookup found, so the next run skips the lookup, and a `pdf` link to each
+   * saved file. A paper with no note keeps its file and gets no link.
    */
-  private async recordArxivIds(found: Map<string, string>): Promise<void> {
-    for (const [notePath, arxivId] of found) {
+  private async recordDownload(outcome: DownloadOutcome): Promise<void> {
+    const edit = async (notePath: string, what: string, write: (file: TFile) => Promise<void>) => {
       const noteFile = this.app.vault.getAbstractFileByPath(notePath);
-      if (!(noteFile instanceof TFile)) continue;
+      if (!(noteFile instanceof TFile)) return;
       try {
-        await this.app.fileManager.processFrontMatter(
-          noteFile,
-          (fm: Record<string, unknown>) => {
-            if (readFrontmatterArxiv(fm)) return;
-            fm.arxiv = arxivId;
-          }
-        );
+        await write(noteFile);
       } catch (e) {
-        console.error(
-          `Citation Graph: could not record the arXiv ID on ${notePath}`,
-          e
-        );
+        console.error(`Citation Graph: could not record ${what} on ${notePath}`, e);
       }
+    };
+    for (const [notePath, arxivId] of outcome.resolvedArxiv) {
+      await edit(notePath, "the arXiv ID", (file) =>
+        this.app.fileManager.processFrontMatter(file, (fm: Record<string, unknown>) => {
+          if (readFrontmatterArxiv(fm)) return;
+          fm.arxiv = arxivId;
+        })
+      );
+    }
+    for (const [notePath, pdfPath] of outcome.savedPdfs) {
+      await edit(notePath, "the PDF link", (file) => linkPdf(this.app, file, pdfPath));
     }
   }
 
@@ -1815,7 +1819,7 @@ export default class CitationGraphPlugin extends Plugin {
           ? `Downloading "${chosenPapers[0].title}"...`
           : `Downloading ${chosenPapers.length} papers...`
       );
-      const { downloaded, failed, resolvedArxiv } = await downloadPapers(
+      const outcome = await downloadPapers(
         chosenPapers,
         downloadPath,
         adapter,
@@ -1827,7 +1831,8 @@ export default class CitationGraphPlugin extends Plugin {
           resolveArxiv: (paper) => this.findArxivId(paper),
         }
       );
-      await this.recordArxivIds(resolvedArxiv);
+      await this.recordDownload(outcome);
+      const { downloaded, failed } = outcome;
 
       // 9. Report results
       if (failed.length === 0) {
@@ -3022,7 +3027,7 @@ export default class CitationGraphPlugin extends Plugin {
           }
 
           logNotice(`Downloading ${missingPdf.length} PDF${missingPdf.length > 1 ? "s" : ""}...`);
-          const { resolvedArxiv } = await downloadPapers(
+          const outcome = await downloadPapers(
             missingPdf,
             downloadDir,
             adapter,
@@ -3034,7 +3039,7 @@ export default class CitationGraphPlugin extends Plugin {
               resolveArxiv: (paper) => this.findArxivId(paper),
             },
           );
-          await this.recordArxivIds(resolvedArxiv);
+          await this.recordDownload(outcome);
 
           // Re-resolve paths for the ones we tried to download
           for (const paper of missingPdf) {

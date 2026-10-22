@@ -9,6 +9,11 @@ Each released version here is also the body of the matching [GitHub release](htt
 ### Added
 
 - *Canvas: group papers by tag* rearranges the open canvas into one labelled group per tag, read from the `tags` frontmatter of each paper note. A paper with several tags goes under its first, untagged papers go in an *Untagged* group, and arrows, reading-status colours and your own nodes are left as they were. New paper notes start with an empty `tags` list, and *Canvas: relayout* removes the tag groups when it returns the canvas to the timeline.
+- Downloading a PDF now links it from the paper's note, in a `pdf` property, so the file opens straight from the note. A link already there is kept, so downloading again adds nothing.
+
+### Changed
+
+- Downloaded PDFs no longer keep `#`, `^`, `[` or `]` from the paper's title in their filename, since a link to the file could not contain them. A PDF downloaded earlier under such a name is no longer recognised as downloaded.
 
 ## [0.8.0] - 2026-10-07
 
