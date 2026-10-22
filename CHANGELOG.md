@@ -9,6 +9,7 @@ Each released version here is also the body of the matching [GitHub release](htt
 ### Added
 
 - *Canvas: group papers by tag* rearranges the open canvas into one labelled group per tag, read from the `tags` frontmatter of each paper note. A paper with several tags goes under its first, untagged papers go in an *Untagged* group, and arrows, reading-status colours and your own nodes are left as they were. New paper notes start with an empty `tags` list, and *Canvas: relayout* removes the tag groups when it returns the canvas to the timeline.
+- A paper's PDF stored in Zotero can now be opened from its note. Whenever papers are added to a canvas, each one is looked up in the Zotero desktop app by DOI, and a PDF Zotero holds for it is linked from the note's `pdf` property (a vault link when the file is inside the vault, a `file://` link otherwise). An existing `pdf` value is never replaced. The new command *PDFs: link from Zotero* runs the check again for every paper on the canvas, for instance after starting Zotero; the setting *Link Zotero PDFs* turns the automatic check off.
 - Downloading a PDF now links it from the paper's note, in a `pdf` property, so the file opens straight from the note. A link already there is kept, so downloading again adds nothing.
 
 ### Changed

@@ -155,10 +155,24 @@ function editFrontmatter(
  * value already there is the user's or an earlier run's and is left alone,
  * which also makes repeating the call harmless.
  */
-export function linkPdf(app: App, file: TFile, pdfPath: string): Promise<void> {
-  return editFrontmatter(app, file, (fm) => {
-    if (fm.pdf == null || fm.pdf === "" || fm.pdf === "null") fm.pdf = `[[${pdfPath}]]`;
+export async function linkPdf(app: App, file: TFile, pdfPath: string): Promise<void> {
+  await setPdfLink(app, file, `[[${pdfPath}]]`);
+}
+
+/**
+ * Set the note's `pdf` property to `value` unless it already holds one, which
+ * is the user's or an earlier run's and is left alone. Reports whether it
+ * wrote, so repeating a check over the same notes is harmless and countable.
+ */
+export async function setPdfLink(app: App, file: TFile, value: string): Promise<boolean> {
+  let wrote = false;
+  await editFrontmatter(app, file, (fm) => {
+    if (fm.pdf == null || fm.pdf === "" || fm.pdf === "null") {
+      fm.pdf = value;
+      wrote = true;
+    }
   });
+  return wrote;
 }
 
 /** A note's frontmatter as an object of unknown values, or null. */

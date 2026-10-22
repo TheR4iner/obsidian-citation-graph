@@ -349,6 +349,10 @@ export class CitationGraphSettingTab extends PluginSettingTab {
             desc: "Numeric user ID shown at zotero.org → Settings → Security → Applications",
             placeholder: "12345678",
           }),
+          this.toggleRow("linkZoteroPdfs", {
+            name: "Link Zotero PDFs",
+            desc: "When papers are added to a canvas, look each one up by DOI in the Zotero desktop app and link the PDF Zotero stores for it from the note's pdf property. The PDFs: link from Zotero command runs the same check on demand",
+          }),
         ],
       },
       {

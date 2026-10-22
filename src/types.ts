@@ -192,6 +192,8 @@ export interface CitationGraphSettings {
 	recommendWebSearch: boolean;
 	/** Max output tokens for a recommendation call (separate: the list is longer than a summary). */
 	recommendMaxOutputTokens: number;
+	/** Look up papers added to a canvas in the local Zotero and link a stored PDF. */
+	linkZoteroPdfs: boolean;
 }
 
 export const DEFAULT_SETTINGS: CitationGraphSettings = {
@@ -221,6 +223,7 @@ export const DEFAULT_SETTINGS: CitationGraphSettings = {
 	recommendCount: 10,
 	recommendWebSearch: true,
 	recommendMaxOutputTokens: 4096,
+	linkZoteroPdfs: true,
 };
 
 /** The configured canvas color for a given display status. */

@@ -6,6 +6,7 @@ import {
 	bodyHasUserContent,
 	linkPdf,
 	readFrontmatterArxiv,
+	setPdfLink,
 	readFrontmatterTags,
 	withNoteClass,
 } from "./literature";
@@ -512,6 +513,20 @@ describe("createNote folder handling", () => {
 		const path = await new LiteratureNoteManager(vault.app, "papers/ml").createNote(paper());
 		expect(path).toBe("papers/ml/Attention Is All You Need.md");
 		expect(vault.createdFolders).toEqual(["papers", "papers/ml"]);
+	});
+});
+
+describe("setPdfLink", () => {
+	it("writes the link into an empty pdf property", async () => {
+		const note = makeNote({ fm: { doi: "10.1000/xyz", pdf: null } });
+		expect(await setPdfLink(note.app, note.file, "file:///z/a.pdf")).toBe(true);
+		expect(note.fm()?.pdf).toBe("file:///z/a.pdf");
+	});
+
+	it("never overwrites a pdf the note already links", async () => {
+		const note = makeNote({ fm: { doi: "10.1000/xyz", pdf: "[[mine.pdf]]" } });
+		expect(await setPdfLink(note.app, note.file, "file:///z/a.pdf")).toBe(false);
+		expect(note.fm()?.pdf).toBe("[[mine.pdf]]");
 	});
 });
 
