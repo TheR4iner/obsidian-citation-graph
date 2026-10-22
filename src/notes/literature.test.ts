@@ -5,6 +5,7 @@ import {
 	LiteratureNoteManager,
 	bodyHasUserContent,
 	readFrontmatterArxiv,
+	readFrontmatterTags,
 	withNoteClass,
 } from "./literature";
 import { makeNote, makeVault } from "../../test/fakes";
@@ -510,5 +511,36 @@ describe("createNote folder handling", () => {
 		const path = await new LiteratureNoteManager(vault.app, "papers/ml").createNote(paper());
 		expect(path).toBe("papers/ml/Attention Is All You Need.md");
 		expect(vault.createdFolders).toEqual(["papers", "papers/ml"]);
+	});
+});
+
+describe("readFrontmatterTags", () => {
+	it("reads a list, dropping a leading # and blanks", () => {
+		expect(readFrontmatterTags(["#ml", "theory", " ", null])).toEqual(["ml", "theory"]);
+	});
+
+	it("reads a comma- or space-separated string", () => {
+		expect(readFrontmatterTags("ml, theory #optics")).toEqual(["ml", "theory", "optics"]);
+	});
+
+	it("reads a missing or malformed value as no tags", () => {
+		expect(readFrontmatterTags(undefined)).toEqual([]);
+		expect(readFrontmatterTags({ tag: "ml" })).toEqual([]);
+	});
+});
+
+describe("LiteratureNoteManager.getPrimaryTag", () => {
+	const primaryTag = (fm: Record<string, unknown> | null): string | null => {
+		const note = makeNote({ fm });
+		return new LiteratureNoteManager(note.app, "papers").getPrimaryTag(note.file);
+	};
+
+	it("is the first tag", () => {
+		expect(primaryTag({ doi: "10.1/x", tags: ["optics", "ml"] })).toBe("optics");
+	});
+
+	it("is null for an untagged or frontmatter-less note", () => {
+		expect(primaryTag({ doi: "10.1/x", tags: [] })).toBeNull();
+		expect(primaryTag(null)).toBeNull();
 	});
 });

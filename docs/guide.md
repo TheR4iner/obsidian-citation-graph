@@ -34,7 +34,7 @@ Zoomed out, the shape of the literature shows: papers are placed left to right b
 
 **Ask for more.** *Recommend papers* describes the whole canvas to the same LLM and asks what else belongs on it, searching the web where the provider supports it. Every suggestion is checked against a citation database before you see it, so invented papers never reach the picker, and the ones that survive are offered in the same checkbox list *Expand paper* uses.
 
-**Keep it tidy.** *Sync canvas to Zotero* pushes new papers back. *Send papers to canvas* copies or moves papers with their edges between canvases. *Relayout canvas* re-sorts by year. *Delete paper* removes the node, its edges and the note together, which Obsidian's own delete does not.
+**Keep it tidy.** *Sync canvas to Zotero* pushes new papers back. *Send papers to canvas* copies or moves papers with their edges between canvases. *Relayout canvas* re-sorts by year, and *Group papers by tag* gathers papers into a labelled group per tag from their notes' `tags`. *Delete paper* removes the node, its edges and the note together, which Obsidian's own delete does not.
 
 ## Requirements
 
@@ -93,13 +93,14 @@ A first run over a large collection takes a few minutes, and a [Semantic Scholar
 
 All are in the command palette under `Citation Graph:`, grouped by a second prefix so that typing the group narrows the list: **Canvas**, **Papers**, **Reading**, **PDFs**, **Maintenance**. The rest of this page refers to each command by its short name.
 
-Only three of them work without a canvas open: *Create from collection*, *Create from tag* and *Clear Semantic Scholar cache*. The other fifteen are hidden from the palette until a canvas is open, so the list stays short while you are reading a note.
+Only three of them work without a canvas open: *Create from collection*, *Create from tag* and *Clear Semantic Scholar cache*. The other sixteen are hidden from the palette until a canvas is open, so the list stays short while you are reading a note.
 
 | Command | What it does |
 |---|---|
 | **Canvas: create from collection** | Builds a canvas from a Zotero collection, into `<collections folder>/<collection name>/` |
 | **Canvas: create from tag** | Builds a canvas from an intersection of Zotero tags, into a folder named after the tags |
-| **Canvas: relayout** | Re-sorts nodes chronologically, discarding manual positions |
+| **Canvas: relayout** | Re-sorts nodes chronologically, discarding manual positions and any tag groups |
+| **Canvas: group papers by tag** | Arranges papers into one labelled group per tag, discarding manual positions. See [Grouping by tag](#grouping-by-tag) |
 | **Canvas: resolve missing citation edges** | Re-checks every paper on the canvas and draws the edges it is missing; **(force refresh)** bypasses the local cache |
 | **Canvas: sync to Zotero** | Pushes the canvas's papers back to a Zotero collection |
 | **Canvas: send papers to another canvas** | Copies or moves papers, with their edges, to another canvas |
@@ -144,6 +145,18 @@ The same paper in four of the five states, at the default colours. The fifth, *R
 **Status lives in the note**, in a `status` frontmatter field, so it follows a paper across every canvas it appears on and is queryable from Dataview. Notes predating this feature carry `read: true` and are treated as *read* until their status is next set.
 
 **"Read + notes written" is derived, not stored.** A paper reaches it when it is marked *Read* **and** its note contains anything beyond the generated template: your own prose, an added heading, a checklist, or a summary from *Write summary*. Both halves are required, so a paper you have not read yet is never labelled as read, however much has been written into its note. It is absent from the status picker for the same reason it exists at all, and it is why *Refresh reading status* exists: writing notes into a paper you have already read changes its appearance with no command involved.
+
+### Grouping by tag
+
+Paper notes carry ordinary Obsidian tags in their `tags` frontmatter, which new notes get as an empty list ready to fill. *Group papers by tag* reads them and rearranges the canvas into one labelled group per tag, ordered alphabetically, with papers that have no tag in a final *Untagged* group.
+
+- **A paper with several tags goes under its first one.** Put the tag you want it grouped by first. A card is never duplicated, since each paper is one node and its citation arrows hang off that node.
+- **Inside a group**, papers keep the left-to-right order they had, so a canvas laid out by year stays in publication order, filled column by column into a roughly square grid.
+- **Arrows, reading-status colours and labels are kept**, because the cards are moved rather than recreated.
+- **Your own nodes stay put**: text cards, links, notes that are not papers, and groups you drew yourself. The tag groups start where the papers' top-left corner was, so they can end up over your own nodes.
+- **Running it again** replaces the groups it drew last time, so retag papers and re-run freely. *Relayout* goes back to the timeline and removes the tag groups.
+
+Only the frontmatter `tags` are read, not inline `#tags` in the note body.
 
 ### Reading an abstract in the picker
 
@@ -305,6 +318,7 @@ arxiv: "1706.03762"
 citekey: "vaswani2017attention"
 semantic_scholar_id: "204e3073870fae3d05bcbc2f6a8e263d9b72e776"
 status: unread
+tags: []
 cssclasses:
   - citation-graph-note
   - citation-graph-status-unread
@@ -314,6 +328,8 @@ cssclasses:
 The body carries a title heading, an author/year/DOI/arXiv block, a `## Summary` section written by *Write summary*, and a `## Notes` section for you.
 
 `status` holds one of `unread`, `reading`, `read` or `abandoned`, which the interface labels *To read*, *Reading*, *Read* and *Abandoned*. *Read + notes written* has no stored value: it is derived, from `read` plus content in the note's body.
+
+`tags` is yours: the plugin never writes to it after creating the note, and *Group papers by tag* groups each paper under its first tag.
 
 `cssclasses` carries `citation-graph-note`, which marks the note as a paper, and one `citation-graph-status-*` class the canvas styling reads. Both are rewritten whenever the plugin paints a canvas, so edit `status` rather than the class; any classes of your own are left where they are.
 

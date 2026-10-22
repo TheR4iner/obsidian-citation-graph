@@ -47,6 +47,8 @@ export interface CanvasNode {
 	file?: string;
 	text?: string;
 	url?: string;
+	/** Title shown on a group node. */
+	label?: string;
 	color?: string;
 }
 

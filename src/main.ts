@@ -60,6 +60,7 @@ import { LiteratureNoteManager, readFrontmatterArxiv } from "./notes/literature"
 import { hasSummarySection, insertSummaryText } from "./notes/summary-text";
 import { buildCanvas, expandCanvas, resolveNewEdges } from "./canvas/builder";
 import { parseCanvasData } from "./canvas/parse";
+import { isTagGroup, layoutByTag } from "./canvas/tag-layout";
 import { registerCanvasPaperMenu } from "./canvas/node-menu";
 import { hasPaperNode, resolvePaperNodeId, layoutPapers, layoutNewPapers } from "./canvas/layout";
 import { S2RefCache } from "./api/s2-cache";
@@ -259,6 +260,7 @@ export default class CitationGraphPlugin extends Plugin {
         "Canvas: resolve missing citation edges (force refresh)",
         () => this.resolveMissingEdges({ forceRefresh: true }),
       ],
+      ["relayout-by-tag", "Canvas: group papers by tag", () => this.relayoutByTag()],
       ["sync-to-zotero", "Canvas: sync to Zotero", () => this.syncToZotero()],
       ["download-papers", "PDFs: download", () => this.downloadPapersFromCanvas()],
       ["add-paper-by-doi", "Papers: add by DOI or arXiv", () => this.addPaperByDoi()],
@@ -2091,6 +2093,53 @@ export default class CitationGraphPlugin extends Plugin {
   }
 
   /**
+   * Rearrange the active canvas into one labelled group per paper tag.
+   *
+   * Tags come from the metadata cache, which is safe here: nothing in this
+   * command writes a note before reading it.
+   */
+  private async relayoutByTag(): Promise<void> {
+    try {
+      const canvasFile = this.findActiveCanvas();
+      if (!canvasFile) {
+        logNotice("Open a citation graph canvas first, then run this command.");
+        return;
+      }
+
+      if (!(await this.confirmPositionReset("Group papers by tag", "Group"))) return;
+
+      const canvasData = await this.readCanvas<CanvasMeta>(canvasFile);
+      const noteManager = new LiteratureNoteManager(
+        this.app,
+        normalizePath(this.settings.collectionsFolder)
+      );
+      const tagOf = new Map<string, string | null>();
+      for (const notePath of notePathsOf(canvasData.nodes)) {
+        const noteFile = this.app.vault.getAbstractFileByPath(notePath);
+        if (noteFile instanceof TFile && noteManager.isPaperNote(noteFile)) {
+          tagOf.set(notePath, noteManager.getPrimaryTag(noteFile));
+        }
+      }
+      if (tagOf.size === 0) {
+        logNotice("No papers on this canvas to group.");
+        return;
+      }
+
+      await this.updateCanvas<CanvasMeta>(canvasFile, (canvas) => {
+        canvas.nodes = layoutByTag(canvas.nodes, tagOf);
+      });
+
+      const groups = new Set(tagOf.values()).size;
+      logNotice(
+        `Grouped ${tagOf.size} paper${tagOf.size === 1 ? "" : "s"} into ${groups} group${groups === 1 ? "" : "s"}.`
+      );
+    } catch (e) {
+      console.error("Citation Graph: Error grouping papers by tag", e);
+      logNotice(`Error: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
+  /**
    * Set an explicit status on the selected papers.
    *
    * "Read + notes written" is not offered here: it is derived from the note
@@ -2466,6 +2515,16 @@ export default class CitationGraphPlugin extends Plugin {
 
   // ─── Relayout Canvas ───────────────────────────────────────
 
+  /** Ask before a command that moves every paper and discards manual positions. */
+  private confirmPositionReset(title: string, action: string): Promise<boolean> {
+    return askChoice<boolean>(this.app, {
+      title,
+      question: "This will reset all paper positions. Custom positioning will be lost.",
+      choices: [{ text: action, value: true, cta: true }],
+      cancelled: false,
+    });
+  }
+
   private async relayoutCanvas(): Promise<void> {
     try {
       // Find the canvas file
@@ -2475,29 +2534,7 @@ export default class CitationGraphPlugin extends Plugin {
         return;
       }
 
-      // Confirmation dialog
-      const confirmed = await new Promise<boolean>((resolve) => {
-        const modal = new Modal(this.app);
-        modal.onOpen = () => {
-          const { contentEl } = modal;
-          modal.setTitle("Relayout canvas");
-          contentEl.createEl("p", {
-            text: "This will reset all node positions. Custom positioning will be lost.",
-          });
-          const footer = contentEl.createDiv({ cls: "citation-graph-footer" });
-          new ButtonComponent(footer)
-            .setButtonText("Relayout")
-            .setCta()
-            .onClick(() => { resolve(true); modal.close(); });
-          new ButtonComponent(footer)
-            .setButtonText("Cancel")
-            .onClick(() => modal.close());
-        };
-        modal.onClose = () => resolve(false);
-        modal.open();
-      });
-
-      if (!confirmed) return;
+      if (!(await this.confirmPositionReset("Relayout canvas", "Relayout"))) return;
 
       const canvasData = await this.readCanvas<CanvasMeta>(activeFile);
 
@@ -2546,7 +2583,8 @@ export default class CitationGraphPlugin extends Plugin {
       // Move the file nodes onto their new positions and leave every other
       // node where it is.
       await this.updateCanvas<CanvasMeta>(activeFile, (canvas) => {
-        canvas.nodes = canvas.nodes.map((node) => {
+        // Tag groups from "Group papers by tag" would no longer frame anything.
+        canvas.nodes = canvas.nodes.filter((node) => !isTagGroup(node)).map((node) => {
           const updated = newLayoutById.get(node.id);
           return updated
             ? { ...node, x: updated.x, y: updated.y, width: updated.width, height: updated.height }
