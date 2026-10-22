@@ -35,7 +35,7 @@ import {
   STATUS_LABELS,
 } from "./types";
 import { CitationGraphSettingTab } from "./settings";
-import { ZoteroClient } from "./api/zotero";
+import { ZoteroClient, ZoteroUnreachableError } from "./api/zotero";
 import { SemanticScholarClient } from "./api/semantic-scholar";
 import { OpenAlexClient } from "./api/openalex";
 import { CrossRefClient } from "./api/crossref";
@@ -48,7 +48,7 @@ import { CollectionPickerModal } from "./modals/collection-picker";
 import { TagPickerModal } from "./modals/tag-picker";
 import { ExpandPickerModal } from "./modals/expand-picker";
 import { DownloadPickerModal, downloadPapers, buildPaperFilename } from "./modals/download-picker";
-import { estimatePdfPages, fileInFolder, vaultFolder } from "./paper-files";
+import { estimatePdfPages, fileInFolder, pdfLinkValue, vaultFolder } from "./paper-files";
 import { SendPickerModal } from "./modals/send-picker";
 import { RecommendPromptModal } from "./modals/recommend-prompt-modal";
 import { RecommendPickerModal } from "./modals/recommend-picker";
@@ -56,7 +56,7 @@ import { StatusPickerModal } from "./modals/status-picker";
 import { PromiseModal } from "./modals/promise-modal";
 import { askChoice } from "./modals/choice-modal";
 import type { BannedPaper } from "./types";
-import { LiteratureNoteManager, readFrontmatterArxiv } from "./notes/literature";
+import { LiteratureNoteManager, readFrontmatterArxiv, setPdfLink } from "./notes/literature";
 import { hasSummarySection, insertSummaryText } from "./notes/summary-text";
 import { buildCanvas, expandCanvas, resolveNewEdges } from "./canvas/builder";
 import { parseCanvasData } from "./canvas/parse";
@@ -261,6 +261,7 @@ export default class CitationGraphPlugin extends Plugin {
       ],
       ["sync-to-zotero", "Canvas: sync to Zotero", () => this.syncToZotero()],
       ["download-papers", "PDFs: download", () => this.downloadPapersFromCanvas()],
+      ["link-zotero-pdfs", "PDFs: link from Zotero", () => this.linkZoteroPdfsOnCanvas()],
       ["add-paper-by-doi", "Papers: add by DOI or arXiv", () => this.addPaperByDoi()],
       [
         "refresh-reading-status",
@@ -763,6 +764,7 @@ export default class CitationGraphPlugin extends Plugin {
     logNotice(
       `Citation graph created: ${papers.size} papers, ${edges.length} edges`
     );
+    await this.linkZoteroPdfs(Array.from(papers.values()), false);
   }
 
   // ─── Expand Paper ───────────────────────────────────────────
@@ -1038,6 +1040,7 @@ export default class CitationGraphPlugin extends Plugin {
       logNotice(
         `Added ${selected.length} papers to canvas.`
       );
+      await this.linkZoteroPdfs(newPapers, false);
     } catch (e) {
       console.error("Citation Graph: Error expanding paper", e);
       logNotice(`Error: ${e instanceof Error ? e.message : String(e)}`);
@@ -1169,6 +1172,7 @@ export default class CitationGraphPlugin extends Plugin {
         ? ""
         : ` (metadata from ${resolved.metadataSource})`;
       logNotice(`Added "${paper.title}" to canvas${sourceLabel}.`);
+      await this.linkZoteroPdfs([paper], false);
 
       if (resolved.references.length === 0 && resolved.citations.length === 0) {
         logNotice(
@@ -1714,6 +1718,73 @@ export default class CitationGraphPlugin extends Plugin {
       `Added ${newPapers.length} papers to canvas` +
       (withoutEdges > 0 ? ` (${withoutEdges} with no citation link to the canvas).` : ".")
     );
+    await this.linkZoteroPdfs(newPapers, false);
+  }
+
+  // ─── Zotero PDF links ───────────────────────────────────
+
+  /** The "PDFs: link from Zotero" command: check every paper on the active canvas. */
+  private async linkZoteroPdfsOnCanvas(): Promise<void> {
+    try {
+      const canvasFile = this.findActiveCanvas();
+      if (!canvasFile) {
+        logNotice("Open a citation graph canvas first, then run this command.");
+        return;
+      }
+      const canvasData = await this.readCanvas<CanvasMeta>(canvasFile);
+      await this.linkZoteroPdfs(this.papersOnNodes(canvasData.nodes), true);
+    } catch (e) {
+      console.error("Citation Graph: Error linking Zotero PDFs", e);
+      logNotice(`Error: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
+  /**
+   * Look each paper up in the local Zotero by DOI and link the PDF Zotero
+   * stores for it from the note's `pdf` property, leaving any existing value.
+   *
+   * Runs after papers are added (when the setting is on) and from the command.
+   * Zotero not running is reported once and ends the run without failing the
+   * add that triggered it. The automatic run stays quiet when it linked
+   * nothing, so adding papers without Zotero open costs one notice at most.
+   */
+  private async linkZoteroPdfs(papers: Paper[], manual: boolean): Promise<void> {
+    if (!manual && !this.settings.linkZoteroPdfs) return;
+    const candidates = papers.filter((p) => p.doi && p.notePath);
+    if (candidates.length === 0) {
+      if (manual) logNotice("No papers with a DOI on this canvas to look up in Zotero.");
+      return;
+    }
+
+    const zotero = new ZoteroClient("", "");
+    const vaultBase = this.fileSystemAdapter()?.getBasePath() ?? null;
+    let linked = 0;
+    let alreadyLinked = 0;
+    let failed = 0;
+    for (const paper of candidates) {
+      try {
+        const url = await zotero.findPdfFileUrl(paper.doi!);
+        if (!url) continue;
+        const file = this.app.vault.getAbstractFileByPath(paper.notePath!);
+        if (!(file instanceof TFile)) continue;
+        if (await setPdfLink(this.app, file, pdfLinkValue(url, vaultBase))) linked++;
+        else alreadyLinked++;
+      } catch (e) {
+        if (e instanceof ZoteroUnreachableError) {
+          logNotice(`Could not check Zotero for PDFs: ${e.message}`);
+          return;
+        }
+        failed++;
+        console.error(`Citation Graph: Zotero PDF lookup failed for ${paper.doi}`, e);
+        logOnly(`Zotero PDF lookup failed for ${paper.doi}: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+
+    if (!manual && linked === 0 && failed === 0) return;
+    const parts = [`Linked ${linked} PDF${linked === 1 ? "" : "s"} from Zotero`];
+    if (alreadyLinked > 0) parts.push(`${alreadyLinked} already linked`);
+    if (failed > 0) parts.push(`${failed} lookup${failed === 1 ? "" : "s"} failed, see the log`);
+    logNotice(`${parts.join(", ")}.`);
   }
 
   // ─── Download Papers ────────────────────────────────────

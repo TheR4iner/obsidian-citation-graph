@@ -591,3 +591,19 @@ function indexNote(
   add(index.byS2, ids.semanticScholarId);
   add(index.byTitle, ids.title);
 }
+
+/**
+ * Set the note's `pdf` property to `value` unless it already holds one, which
+ * is the user's or an earlier run's and is left alone. Reports whether it
+ * wrote, so repeating a check over the same notes is harmless and countable.
+ */
+export async function setPdfLink(app: App, file: TFile, value: string): Promise<boolean> {
+  let wrote = false;
+  await editFrontmatter(app, file, (fm) => {
+    if (fm.pdf == null || fm.pdf === "" || fm.pdf === "null") {
+      fm.pdf = value;
+      wrote = true;
+    }
+  });
+  return wrote;
+}

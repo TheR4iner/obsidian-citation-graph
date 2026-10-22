@@ -30,7 +30,7 @@ Zoomed out, the shape of the literature shows: papers are placed left to right b
 
 **Read through it.** Every paper carries a reading status painted as its node colour, so a canvas doubles as a reading list: *to read*, *reading*, *read*, *read with notes written*, and *abandoned*. Set them one at a time, cycle them from a hotkey, or repaint a whole canvas at once.
 
-**Fill it in.** *Download* fetches PDFs from arXiv. *Write summary* sends a PDF to Anthropic, OpenAI, Google Gemini, or a local Claude CLI and writes a structured summary into the note, with a progress bar and a token budget you can cap.
+**Fill it in.** Papers added to a canvas are looked up in Zotero by DOI, and a PDF Zotero stores is linked from the note's `pdf` property. *Download* fetches PDFs from arXiv. *Write summary* sends a PDF to Anthropic, OpenAI, Google Gemini, or a local Claude CLI and writes a structured summary into the note, with a progress bar and a token budget you can cap.
 
 **Ask for more.** *Recommend papers* describes the whole canvas to the same LLM and asks what else belongs on it, searching the web where the provider supports it. Every suggestion is checked against a citation database before you see it, so invented papers never reach the picker, and the ones that survive are offered in the same checkbox list *Expand paper* uses.
 
@@ -52,7 +52,7 @@ Nothing here happens without you running a command, and nothing is collected abo
 
 | Service | When | What is sent |
 | --- | --- | --- |
-| Zotero local API, `localhost:23119` | *Create from collection*, *Create from tag* | Nothing leaves your machine |
+| Zotero local API, `localhost:23119` | *Create from collection*, *Create from tag*; looking up the PDF of each paper added to a canvas (unless *Link Zotero PDFs* is off) and *PDFs: link from Zotero* | Nothing leaves your machine. The PDF lookup sends each paper's DOI to Zotero |
 | `api.semanticscholar.org` | Resolving papers and their citation links | DOIs, arXiv IDs, paper titles |
 | `api.openalex.org` | Extra references and citing works when expanding a paper or resolving edges; papers Semantic Scholar cannot resolve; finding an arXiv preprint behind a publisher DOI | DOIs, and your contact email if you set one |
 | `api.crossref.org` | Reference lists, and their order, when expanding a paper or resolving edges; papers the above cannot resolve | DOIs, and your contact email if you set one |
@@ -111,6 +111,7 @@ Only three of them work without a canvas open: *Create from collection*, *Create
 | **Reading: cycle reading status** | Advances the selection one step through *to read*, *reading*, *read*. Good on a hotkey |
 | **Reading: refresh reading status** | Repaints every paper on the canvas from its note |
 | **PDFs: download** | Fetches PDFs for papers on the canvas |
+| **PDFs: link from Zotero** | Looks every paper on the canvas up in Zotero by DOI and links the PDF Zotero stores from its note. See [Zotero PDF links](#zotero-pdf-links) |
 | **PDFs: write summary** | Writes an LLM summary into the note under `## Summary` |
 | **Maintenance: clear Semantic Scholar cache** | Drops cached reference data if you suspect it is stale |
 
@@ -169,6 +170,12 @@ Versions before 0.7.0 saved PDFs anywhere on disk. A stored folder that points i
 
 Only arXiv ships configured, so a paper with no arXiv version cannot be fetched. Adding a source is a code change: see [Adding a PDF download source](#adding-a-pdf-download-source).
 
+### Zotero PDF links
+
+**Each paper added to a canvas is looked up in Zotero by its DOI**, whether it arrives from a collection, a tag, *Expand paper*, *Add paper by DOI or arXiv* or *Recommend papers*. When Zotero holds the paper and its best attachment (the one Zotero itself opens first, a PDF when there is one) is a PDF present on this computer, the note's `pdf` property gets a link to it: a wikilink when Zotero's file sits inside the vault, otherwise a `file://` link that opens in your system's PDF viewer. A `pdf` value already in the note is never replaced, so a link you set yourself, or one an earlier run wrote, stays.
+
+The search covers your personal library and every group library. Papers without a DOI are skipped, and so is a PDF that Zotero lists but has not downloaded (for instance when file sync downloads on demand). If Zotero is not running, one notice says so and the papers are added all the same; run **PDFs: link from Zotero** later to check the whole canvas again. Turn the automatic check off with *Link Zotero PDFs* under Settings, Zotero; the command still works.
+
 ### Recommend papers
 
 **Recommend papers** sends every paper's title, authors, year and identifiers, and nothing else, unless you tick *Include abstracts* in the prompt box. Abstracts cost roughly 250 extra input tokens per paper and, on a large canvas, tend to crowd out the titles, so leave them off unless a run has been giving vague suggestions. The prompt box overrides the *Recommendation prompt* setting for one run; the canvas listing and the required JSON reply format are appended by the plugin either way, so a custom prompt cannot break parsing. Suggestions that no citation source can find are discarded, as are ones whose DOI turns out to belong to a different paper: the count of each is reported, and the titles go to `citation-graph.log`.
@@ -209,8 +216,9 @@ Every setting is indexed by Obsidian's settings search. The settings tab present
 |---|---|---|
 | **Zotero API key** | Needed only for *Sync canvas to Zotero* | |
 | **Zotero user ID** | Numeric ID shown at zotero.org, Settings, Security, Applications | |
+| **Link Zotero PDFs** | Look papers added to a canvas up in Zotero by DOI and link the PDF Zotero stores from the note's `pdf` property. See [Zotero PDF links](#zotero-pdf-links) | On |
 
-Reading a collection needs neither: that goes through Zotero's local API, which is unauthenticated.
+Reading a collection and linking its PDFs need neither: that goes through Zotero's local API, which is unauthenticated.
 
 ### Semantic Scholar
 
@@ -305,6 +313,7 @@ arxiv: "1706.03762"
 citekey: "vaswani2017attention"
 semantic_scholar_id: "204e3073870fae3d05bcbc2f6a8e263d9b72e776"
 status: unread
+pdf: "file:///home/you/Zotero/storage/ABCD1234/Vaswani et al. - 2017 - Attention Is All You Need.pdf"
 cssclasses:
   - citation-graph-note
   - citation-graph-status-unread
@@ -315,11 +324,13 @@ The body carries a title heading, an author/year/DOI/arXiv block, a `## Summary`
 
 `status` holds one of `unread`, `reading`, `read` or `abandoned`, which the interface labels *To read*, *Reading*, *Read* and *Abandoned*. *Read + notes written* has no stored value: it is derived, from `read` plus content in the note's body.
 
+`pdf` links the paper's PDF once one is known (see [Zotero PDF links](#zotero-pdf-links)); the plugin only ever fills it when empty.
+
 `cssclasses` carries `citation-graph-note`, which marks the note as a paper, and one `citation-graph-status-*` class the canvas styling reads. Both are rewritten whenever the plugin paints a canvas, so edit `status` rather than the class; any classes of your own are left where they are.
 
 ## How it works
 
-The **Zotero local API** on `localhost:23119` reads collections and items, needing no authentication. **Semantic Scholar** resolves papers by DOI or arXiv ID and supplies citation relationships; **OpenAlex**, **arXiv** and **Crossref** cover papers it does not know. The **Zotero Web API** writes papers back and needs your API key. For summaries, Anthropic and Google take the PDF natively while OpenAI receives it as a file attachment.
+The **Zotero local API** on `localhost:23119` reads collections and items and finds each paper's stored PDF, needing no authentication. **Semantic Scholar** resolves papers by DOI or arXiv ID and supplies citation relationships; **OpenAlex**, **arXiv** and **Crossref** cover papers it does not know. The **Zotero Web API** writes papers back and needs your API key. For summaries, Anthropic and Google take the PDF natively while OpenAI receives it as a file attachment.
 
 ## Limitations
 

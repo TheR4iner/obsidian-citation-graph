@@ -6,6 +6,10 @@ Each released version here is also the body of the matching [GitHub release](htt
 
 ## [Unreleased]
 
+### Added
+
+- A paper's PDF stored in Zotero can now be opened from its note. Whenever papers are added to a canvas, each one is looked up in the Zotero desktop app by DOI, and a PDF Zotero holds for it is linked from the note's new `pdf` property (a vault link when the file is inside the vault, a `file://` link otherwise). An existing `pdf` value is never replaced. The new command *PDFs: link from Zotero* runs the check again for every paper on the canvas, for instance after starting Zotero; the setting *Link Zotero PDFs* turns the automatic check off.
+
 ## [0.8.0] - 2026-10-07
 
 ### Added
