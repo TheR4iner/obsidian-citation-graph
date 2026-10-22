@@ -34,7 +34,7 @@ Zoomed out, the shape of the literature shows: papers are placed left to right b
 
 **Ask for more.** *Recommend papers* describes the whole canvas to the same LLM and asks what else belongs on it, searching the web where the provider supports it. Every suggestion is checked against a citation database before you see it, so invented papers never reach the picker, and the ones that survive are offered in the same checkbox list *Expand paper* uses.
 
-**Keep it tidy.** *Sync canvas to Zotero* pushes new papers back. *Send papers to canvas* copies or moves papers with their edges between canvases. *Relayout canvas* re-sorts by year, and *Group papers by tag* gathers papers into a labelled group per tag from their notes' `tags`. *Delete paper* removes the node, its edges and the note together, which Obsidian's own delete does not.
+**Keep it tidy.** *Sync canvas to Zotero* pushes new papers back. *Send papers to canvas* copies or moves papers with their edges between canvases. *Relayout canvas* re-sorts by year, and *Group papers by tag* gathers papers into overlapping labelled groups, one per tag, from their notes' `tags`. *Delete paper* removes the node, its edges and the note together, which Obsidian's own delete does not.
 
 ## Requirements
 
@@ -100,7 +100,7 @@ Only three of them work without a canvas open: *Create from collection*, *Create
 | **Canvas: create from collection** | Builds a canvas from a Zotero collection, into `<collections folder>/<collection name>/` |
 | **Canvas: create from tag** | Builds a canvas from an intersection of Zotero tags, into a folder named after the tags |
 | **Canvas: relayout** | Re-sorts nodes chronologically, discarding manual positions and any tag groups |
-| **Canvas: group papers by tag** | Arranges papers into one labelled group per tag, discarding manual positions. See [Grouping by tag](#grouping-by-tag) |
+| **Canvas: group papers by tag** | Arranges papers into overlapping labelled groups, one per tag, discarding manual positions. See [Grouping by tag](#grouping-by-tag) |
 | **Canvas: resolve missing citation edges** | Re-checks every paper on the canvas and draws the edges it is missing; **(force refresh)** bypasses the local cache |
 | **Canvas: sync to Zotero** | Pushes the canvas's papers back to a Zotero collection |
 | **Canvas: send papers to another canvas** | Copies or moves papers, with their edges, to another canvas |
@@ -149,15 +149,17 @@ The same paper in four of the five states, at the default colours. The fifth, *R
 
 ### Grouping by tag
 
-Paper notes carry ordinary Obsidian tags in their `tags` frontmatter, which new notes get as an empty list ready to fill. *Group papers by tag* reads them and rearranges the canvas into one labelled group per tag, ordered alphabetically, with papers that have no tag in a final *Untagged* group.
+Paper notes carry ordinary Obsidian tags in their `tags` frontmatter, which new notes get as an empty list ready to fill. *Group papers by tag* reads them and rearranges the canvas into one labelled group per tag. Papers with no tag go in a separate *Untagged* group.
 
-- **A paper with several tags goes under its first one.** Put the tag you want it grouped by first. A card is never duplicated, since each paper is one node and its citation arrows hang off that node.
-- **Inside a group**, papers keep the left-to-right order they had, so a canvas laid out by year stays in publication order, filled column by column into a roughly square grid.
+- **A paper with several tags sits where their groups overlap.** Obsidian counts a card as belonging to every group whose rectangle contains it, so a paper tagged `#optics` and `#ml` is placed inside both the *#optics* and the *#ml* rectangle, and outside every group whose tag it does not have. Each paper stays a single card, so its citation arrows are untouched.
+- **At most three tags per paper.** A paper with more is not placed by tag: it goes in a *Too many tags* group, and a notice that stays until you dismiss it names it. Trim its tags and run the command again.
+- **Not every mix of tags can be drawn with rectangles.** With many tags sharing papers, there may be no way to place the rectangles so that every combination gets a region of its own; the number of regions rectangles can form grows more slowly than the number of three-tag combinations. The command searches for the placement that fits as many papers as it can. A paper whose exact combination still has no region goes in a *Tag combination not drawable* group, and a notice names it. A paper is never placed inside a group whose tag it lacks. Tags that never share a paper are drawn apart from each other, so the search only has to untangle tags that actually overlap.
+- **Inside each region**, papers keep the left-to-right order they had, so a canvas laid out by year stays in publication order, filled column by column into a roughly square grid.
 - **Arrows, reading-status colours and labels are kept**, because the cards are moved rather than recreated.
 - **Your own nodes stay put**: text cards, links, notes that are not papers, and groups you drew yourself. The tag groups start where the papers' top-left corner was, so they can end up over your own nodes.
-- **Running it again** replaces the groups it drew last time, so retag papers and re-run freely. *Relayout* goes back to the timeline and removes the tag groups.
+- **Running it again** replaces the groups it drew last time and gives the same layout for the same tags, so retag papers and re-run freely. *Relayout* goes back to the timeline and removes the tag groups.
 
-Only the frontmatter `tags` are read, not inline `#tags` in the note body.
+Tags are matched without regard to case, as Obsidian does, and only the frontmatter `tags` are read, not inline `#tags` in the note body.
 
 ### Reading an abstract in the picker
 
@@ -342,7 +344,7 @@ The body carries a title heading, an author/year/DOI/arXiv block, a `## Summary`
 
 `status` holds one of `unread`, `reading`, `read` or `abandoned`, which the interface labels *To read*, *Reading*, *Read* and *Abandoned*. *Read + notes written* has no stored value: it is derived, from `read` plus content in the note's body.
 
-`tags` is yours: the plugin never writes to it after creating the note, and *Group papers by tag* groups each paper under its first tag.
+`tags` is yours: the plugin never writes to it after creating the note. *Group papers by tag* places each paper in the overlap of its tags' groups, and accepts at most three tags per paper.
 
 `cssclasses` carries `citation-graph-note`, which marks the note as a paper, and one `citation-graph-status-*` class the canvas styling reads. Both are rewritten whenever the plugin paints a canvas, so edit `status` rather than the class; any classes of your own are left where they are.
 

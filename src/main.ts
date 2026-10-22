@@ -61,7 +61,14 @@ import { LiteratureNoteManager, linkPdf, readFrontmatterArxiv, setPdfLink } from
 import { hasSummarySection, insertSummaryText } from "./notes/summary-text";
 import { buildCanvas, expandCanvas, resolveNewEdges } from "./canvas/builder";
 import { parseCanvasData } from "./canvas/parse";
-import { isTagGroup, layoutByTag } from "./canvas/tag-layout";
+import {
+  isTagGroup,
+  layoutByTag,
+  MAX_TAGS_PER_PAPER,
+  TOO_MANY_TAGS_LABEL,
+  UNDRAWABLE_LABEL,
+  type TagLayoutResult,
+} from "./canvas/tag-layout";
 import { registerCanvasPaperMenu } from "./canvas/node-menu";
 import { hasPaperNode, resolvePaperNodeId, layoutPapers, layoutNewPapers } from "./canvas/layout";
 import { S2RefCache } from "./api/s2-cache";
@@ -173,6 +180,13 @@ function paperFromFrontmatter(
     citationCount: null,
     notePath,
   };
+}
+
+/** Papers named by their note's file name, for a notice: the first five, then a count. */
+function namePapers(notePaths: string[]): string {
+  const names = notePaths.slice(0, 5).map((p) => p.replace(/^.*\//, "").replace(/\.md$/, ""));
+  const more = notePaths.length - names.length;
+  return names.join(", ") + (more > 0 ? ` and ${more} more` : "");
 }
 
 /** The note path behind every paper node on a canvas. */
@@ -2189,11 +2203,11 @@ export default class CitationGraphPlugin extends Plugin {
         this.app,
         normalizePath(this.settings.collectionsFolder)
       );
-      const tagOf = new Map<string, string | null>();
+      const tagOf = new Map<string, string[]>();
       for (const notePath of notePathsOf(canvasData.nodes)) {
         const noteFile = this.app.vault.getAbstractFileByPath(notePath);
         if (noteFile instanceof TFile && noteManager.isPaperNote(noteFile)) {
-          tagOf.set(notePath, noteManager.getPrimaryTag(noteFile));
+          tagOf.set(notePath, noteManager.getTags(noteFile));
         }
       }
       if (tagOf.size === 0) {
@@ -2201,14 +2215,32 @@ export default class CitationGraphPlugin extends Plugin {
         return;
       }
 
+      // Reported from what was written, not from the snapshot read above.
+      const reported: Pick<TagLayoutResult, "tooManyTags" | "undrawable"> = {
+        tooManyTags: [],
+        undrawable: [],
+      };
       await this.updateCanvas<CanvasMeta>(canvasFile, (canvas) => {
-        canvas.nodes = layoutByTag(canvas.nodes, tagOf);
+        const result = layoutByTag(canvas.nodes, tagOf);
+        canvas.nodes = result.nodes;
+        reported.tooManyTags = result.tooManyTags;
+        reported.undrawable = result.undrawable;
       });
+      const { tooManyTags, undrawable } = reported;
 
-      const groups = new Set(tagOf.values()).size;
-      logNotice(
-        `Grouped ${tagOf.size} paper${tagOf.size === 1 ? "" : "s"} into ${groups} group${groups === 1 ? "" : "s"}.`
-      );
+      logNotice(`Grouped ${tagOf.size} paper${tagOf.size === 1 ? "" : "s"} by tag.`);
+      if (tooManyTags.length > 0) {
+        logNotice(
+          `${namePapers(tooManyTags)} ${tooManyTags.length === 1 ? "has" : "have"} more than ${MAX_TAGS_PER_PAPER} tags, so ${tooManyTags.length === 1 ? "it was" : "they were"} put in "${TOO_MANY_TAGS_LABEL}" instead of the tag groups.`,
+          0
+        );
+      }
+      if (undrawable.length > 0) {
+        logNotice(
+          `No arrangement of the tag groups could give ${namePapers(undrawable)} a region matching exactly ${undrawable.length === 1 ? "its" : "their"} tags, so ${undrawable.length === 1 ? "it was" : "they were"} put in "${UNDRAWABLE_LABEL}".`,
+          0
+        );
+      }
     } catch (e) {
       console.error("Citation Graph: Error grouping papers by tag", e);
       logNotice(`Error: ${e instanceof Error ? e.message : String(e)}`);

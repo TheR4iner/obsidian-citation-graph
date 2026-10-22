@@ -545,19 +545,19 @@ describe("readFrontmatterTags", () => {
 	});
 });
 
-describe("LiteratureNoteManager.getPrimaryTag", () => {
-	const primaryTag = (fm: Record<string, unknown> | null): string | null => {
+describe("LiteratureNoteManager.getTags", () => {
+	const tags = (fm: Record<string, unknown> | null): string[] => {
 		const note = makeNote({ fm });
-		return new LiteratureNoteManager(note.app, "papers").getPrimaryTag(note.file);
+		return new LiteratureNoteManager(note.app, "papers").getTags(note.file);
 	};
 
-	it("is the first tag", () => {
-		expect(primaryTag({ doi: "10.1/x", tags: ["optics", "ml"] })).toBe("optics");
+	it("reads every tag in order", () => {
+		expect(tags({ doi: "10.1/x", tags: ["optics", "#ml"] })).toEqual(["optics", "ml"]);
 	});
 
-	it("is null for an untagged or frontmatter-less note", () => {
-		expect(primaryTag({ doi: "10.1/x", tags: [] })).toBeNull();
-		expect(primaryTag(null)).toBeNull();
+	it("is empty for an untagged or frontmatter-less note", () => {
+		expect(tags({ doi: "10.1/x", tags: [] })).toEqual([]);
+		expect(tags(null)).toEqual([]);
 	});
 });
 
