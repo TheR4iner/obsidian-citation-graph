@@ -80,7 +80,7 @@ export function escapeNoteText(value: string): string {
  * `## Summary`. Deliberately not anchored on the `## Notes` heading, because
  * users routinely delete it and write their own headings in its place.
  */
-const SCAFFOLD_FIELD_LINE = /^\*\*(?:Authors|Year|DOI|arXiv)\*\*:/;
+const SCAFFOLD_FIELD_LINE = /^\*\*(?:Authors|Year|DOI|arXiv|PDF)\*\*:/;
 const SCAFFOLD_NOTES_HEADING = /^##\s+Notes\s*$/;
 const FRONTMATTER_BLOCK = /^---\r?\n[\s\S]*?\r?\n---\r?\n?/;
 
@@ -147,6 +147,64 @@ function editFrontmatter(
   edit: (fm: Record<string, unknown>) => void
 ): Promise<void> {
   return app.fileManager.processFrontMatter(file, edit);
+}
+
+/**
+ * Link `pdfPath` (a vault path) from the note's `pdf` property, as a wikilink
+ * so Obsidian keeps it current when the file is renamed or moved. A `pdf`
+ * value already there is the user's or an earlier run's and is left alone,
+ * which also makes repeating the call harmless.
+ */
+export async function linkPdf(app: App, file: TFile, pdfPath: string): Promise<void> {
+  await setPdfLink(app, file, `[[${pdfPath}]]`);
+}
+
+/**
+ * Set the note's `pdf` property to `value` unless it already holds one, which
+ * is the user's or an earlier run's and is left alone. Reports whether it
+ * wrote, so repeating a check over the same notes is harmless and countable.
+ */
+export async function setPdfLink(app: App, file: TFile, value: string): Promise<boolean> {
+  let wrote = false;
+  let linked: unknown = null;
+  await editFrontmatter(app, file, (fm) => {
+    if (fm.pdf == null || fm.pdf === "" || fm.pdf === "null") {
+      fm.pdf = value;
+      wrote = true;
+    }
+    linked = fm.pdf;
+  });
+  // The body line follows whatever the property holds, so a note whose
+  // property predates the line gets it the next time a PDF is linked.
+  if (typeof linked === "string") {
+    const target = linked;
+    await app.vault.process(file, (content) => insertPdfLine(content, target) ?? content);
+  }
+  return wrote;
+}
+
+/** The note-body line linking a `pdf` property value under a short label. */
+export function pdfBodyLine(value: string): string {
+  const wiki = /^\[\[([^\]|]+)(?:\|[^\]]*)?\]\]$/.exec(value);
+  return wiki ? `**PDF**: [[${wiki[1]}|Open PDF]]` : `**PDF**: [Open PDF](<${value}>)`;
+}
+
+/**
+ * Add the PDF line under the note's metadata lines (authors, year, DOI,
+ * arXiv), or return null when the note already has one or has no metadata
+ * line to anchor it to: a note the user restructured is left alone.
+ */
+export function insertPdfLine(content: string, value: string): string | null {
+  const lines = content.split("\n");
+  if (lines.some((l) => /^\*\*PDF\*\*:/.test(l))) return null;
+  let anchor = -1;
+  for (let i = 0; i < lines.length; i++) {
+    if (/^## /.test(lines[i])) break;
+    if (/^\*\*(Authors|Year|DOI|arXiv)\*\*:/.test(lines[i])) anchor = i;
+  }
+  if (anchor === -1) return null;
+  lines.splice(anchor + 1, 0, pdfBodyLine(value));
+  return lines.join("\n");
 }
 
 /** A note's frontmatter as an object of unknown values, or null. */
@@ -298,6 +356,7 @@ ${paper.arxiv ? `**arXiv**: [${escapeNoteText(paper.arxiv)}](https://arxiv.org/a
       fm.citekey = paper.citekey || null;
       fm.semantic_scholar_id = paper.semanticScholarId || null;
       fm.status = "unread" satisfies PaperStatus;
+      fm.tags = [];
       fm.cssclasses = withNoteClass(fm.cssclasses, "unread");
     });
     paper.notePath = path;
@@ -382,6 +441,11 @@ ${paper.arxiv ? `**arXiv**: [${escapeNoteText(paper.arxiv)}](https://arxiv.org/a
     const fm = frontmatterOf(this.app, file);
     if (!fm) return false;
     return PAPER_ID_FIELDS.some((key) => key in fm);
+  }
+
+  /** The tags in a note's `tags` frontmatter, without the `#`. */
+  getTags(file: TFile): string[] {
+    return readFrontmatterTags(frontmatterOf(this.app, file)?.tags);
   }
 
   /**
@@ -538,6 +602,19 @@ export function withNoteClass(
   );
   const statusClass = status ? [`${STATUS_CLASS_PREFIX}${status}`] : [];
   return [NOTE_CLASS, ...statusClass, ...others];
+}
+
+/**
+ * Read a `tags` frontmatter value as a list of tag names without the `#`.
+ * Obsidian accepts a list or a single string separated by commas or spaces.
+ */
+export function readFrontmatterTags(value: unknown): string[] {
+  const raw = Array.isArray(value)
+    ? value.filter((t) => typeof t === "string" || typeof t === "number").map(String)
+    : typeof value === "string"
+      ? value.split(/[,\s]+/)
+      : [];
+  return raw.map((t) => t.trim().replace(/^#/, "")).filter((t) => t !== "");
 }
 
 /**

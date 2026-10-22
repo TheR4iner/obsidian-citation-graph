@@ -247,3 +247,67 @@ export function resolvePaperNodeId(
 	}
 	return paperNodeId(paper);
 }
+
+export const UPDATE_GROUP_PREFIX = "cg-zotero-update-";
+
+/** Whether a node is a group that *Update from collection* drew. */
+export function isUpdateGroup(node: CanvasNode): boolean {
+	return node.type === "group" && node.id.startsWith(UPDATE_GROUP_PREFIX);
+}
+
+const GROUP_GAP = 400;
+const GROUP_PADDING = 100;
+const CARD_GAP = 100;
+
+/**
+ * Place new paper cards inside one labelled group to the right of everything
+ * already on the canvas, so no existing node has to move.
+ *
+ * The group sits a gap beyond the rightmost edge of the current bounding box,
+ * top-aligned with it, and holds a roughly square grid filled column by
+ * column in publication order. Returns the group first: Obsidian paints nodes
+ * in file order, so a group listed after its cards would cover them.
+ */
+export function placeInNewGroup(
+	existingNodes: CanvasNode[],
+	newPapers: Paper[],
+	group: { id: string; label: string },
+	options: { nodeWidth: number; nodeHeight: number }
+): CanvasNode[] {
+	if (newPapers.length === 0) return [];
+	const x =
+		existingNodes.length === 0
+			? 0
+			: Math.max(...existingNodes.map((n) => n.x + n.width)) + GROUP_GAP;
+	const top =
+		existingNodes.length === 0 ? 0 : Math.min(...existingNodes.map((n) => n.y));
+
+	const papers = [...newPapers].sort((a, b) => (a.year || 0) - (b.year || 0));
+	const rows = Math.ceil(papers.length / Math.ceil(Math.sqrt(papers.length)));
+	const cols = Math.ceil(papers.length / rows);
+	const cellW = options.nodeWidth + CARD_GAP;
+	const cellH = options.nodeHeight + CARD_GAP;
+
+	const cards: CanvasNode[] = papers.map((paper, k) => ({
+		id: paperNodeId(paper),
+		x: x + GROUP_PADDING + Math.floor(k / rows) * cellW,
+		y: top + GROUP_PADDING + (k % rows) * cellH,
+		width: options.nodeWidth,
+		height: options.nodeHeight,
+		type: "file",
+		file: paper.notePath || "",
+	}));
+
+	return [
+		{
+			id: group.id,
+			type: "group",
+			label: group.label,
+			x,
+			y: top,
+			width: 2 * GROUP_PADDING + cols * cellW - CARD_GAP,
+			height: 2 * GROUP_PADDING + rows * cellH - CARD_GAP,
+		},
+		...cards,
+	];
+}

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import * as os from "os";
 import * as path from "path";
-import { estimatePdfPages, fileInFolder, isInside, truncateToBytes, vaultFolder } from "./paper-files";
+import { estimatePdfPages, fileInFolder, isInside, pdfLinkValue, truncateToBytes, vaultFolder } from "./paper-files";
 
 const home = os.homedir();
 const vault = path.join(home, "vaults", "research");
@@ -138,4 +138,26 @@ describe("truncateToBytes", () => {
 	it("drops the trailing space a cut can leave behind", () => {
 		expect(truncateToBytes("abcd efgh", 5)).toBe("abcd");
 	});
+});
+
+describe("pdfLinkValue", () => {
+  it("links a file inside the vault as a wikilink", () => {
+    expect(pdfLinkValue("file:///home/u/vault/Zotero/storage/AB12/My%20Paper.pdf", "/home/u/vault")).toBe(
+      "[[Zotero/storage/AB12/My Paper.pdf]]"
+    );
+  });
+
+  it("keeps the file URL for a file outside the vault", () => {
+    const url = "file:///home/u/Zotero/storage/AB12/My%20Paper.pdf";
+    expect(pdfLinkValue(url, "/home/u/vault")).toBe(url);
+  });
+
+  it("does not treat a sibling folder sharing a prefix as inside", () => {
+    const url = "file:///home/u/vault-old/a.pdf";
+    expect(pdfLinkValue(url, "/home/u/vault")).toBe(url);
+  });
+
+  it("keeps the file URL when the vault has no filesystem path", () => {
+    expect(pdfLinkValue("file:///home/u/vault/a.pdf", null)).toBe("file:///home/u/vault/a.pdf");
+  });
 });

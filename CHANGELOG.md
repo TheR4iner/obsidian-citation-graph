@@ -6,6 +6,20 @@ Each released version here is also the body of the matching [GitHub release](htt
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-10-22
+
+### Added
+
+- *Canvas: update from collection* adds the references you have put in a canvas's Zotero collection since the canvas was created, so a canvas you have rearranged or annotated no longer has to be rebuilt to catch up. Papers already on the canvas are skipped, nothing on it moves, and the new cards arrive in a *New from Zotero* group beside it, with literature notes and citation arrows to the papers already there. *Relayout* and *Group papers by tag* remove that group again when they rearrange the papers. The closing notice says how many papers were added and how many could not be found on Semantic Scholar.
+- *Canvas: group papers by tag* rearranges the open canvas into one labelled group per tag, read from the `tags` frontmatter of each paper note. Groups overlap, so a paper with up to three tags sits inside the groups of exactly its tags. A paper with more tags, or one whose combination of tags no arrangement of rectangles can give a region of its own, goes in a separate group and is named in a notice. Untagged papers go in an *Untagged* group, and arrows, reading-status colours and your own nodes are left as they were. New paper notes start with an empty `tags` list, and *Canvas: relayout* removes the tag groups when it returns the canvas to the timeline.
+- A paper's PDF stored in Zotero can now be opened from its note. Whenever papers are added to a canvas, each one is looked up in the Zotero desktop app by DOI, and a PDF Zotero holds for it is linked from the note's `pdf` property (a vault link when the file is inside the vault, a `file://` link otherwise). An existing `pdf` value is never replaced. The new command *PDFs: link from Zotero* runs the check again for every paper on the canvas, for instance after starting Zotero; the setting *Link Zotero PDFs* turns the automatic check off.
+- Downloading a PDF now links it from the paper's note, in a `pdf` property, so the file opens straight from the note. A link already there is kept, so downloading again adds nothing.
+- A linked PDF, downloaded or found in Zotero, also gets an *Open PDF* link in the note body, below the arXiv line, so it can be opened from the paper's card on the canvas. A note whose `pdf` property was set earlier gets the line the next time a PDF is linked for it, for instance by running *PDFs: link from Zotero*.
+
+### Changed
+
+- Downloaded PDFs no longer keep `#`, `^`, `[` or `]` from the paper's title in their filename, since a link to the file could not contain them. A PDF downloaded earlier under such a name is no longer recognised as downloaded.
+
 ## [0.8.0] - 2026-10-07
 
 ### Added
@@ -175,7 +189,8 @@ First public release.
 - **Sync canvas to Zotero**, **Send papers to canvas**, **Relayout canvas**, **Delete paper**, and **Clear Semantic Scholar cache**.
 - Settings for the collections folder, the Zotero and Semantic Scholar API keys, node size, the five status colours, and the full LLM configuration.
 
-[Unreleased]: https://github.com/TheR4iner/obsidian-citation-graph/compare/0.8.0...HEAD
+[Unreleased]: https://github.com/TheR4iner/obsidian-citation-graph/compare/0.9.0...HEAD
+[0.9.0]: https://github.com/TheR4iner/obsidian-citation-graph/compare/0.8.0...0.9.0
 [0.8.0]: https://github.com/TheR4iner/obsidian-citation-graph/compare/0.7.2...0.8.0
 [0.7.2]: https://github.com/TheR4iner/obsidian-citation-graph/compare/0.7.1...0.7.2
 [0.7.1]: https://github.com/TheR4iner/obsidian-citation-graph/compare/0.7.0...0.7.1

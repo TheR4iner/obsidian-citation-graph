@@ -4,7 +4,12 @@ import { nextStatusInCycle } from "../types";
 import {
 	LiteratureNoteManager,
 	bodyHasUserContent,
+	linkPdf,
 	readFrontmatterArxiv,
+	setPdfLink,
+	insertPdfLine,
+	pdfBodyLine,
+	readFrontmatterTags,
 	withNoteClass,
 } from "./literature";
 import { makeNote, makeVault } from "../../test/fakes";
@@ -510,5 +515,129 @@ describe("createNote folder handling", () => {
 		const path = await new LiteratureNoteManager(vault.app, "papers/ml").createNote(paper());
 		expect(path).toBe("papers/ml/Attention Is All You Need.md");
 		expect(vault.createdFolders).toEqual(["papers", "papers/ml"]);
+	});
+});
+
+describe("setPdfLink", () => {
+	it("writes the link into an empty pdf property", async () => {
+		const note = makeNote({ fm: { doi: "10.1000/xyz", pdf: null } });
+		expect(await setPdfLink(note.app, note.file, "file:///z/a.pdf")).toBe(true);
+		expect(note.fm()?.pdf).toBe("file:///z/a.pdf");
+	});
+
+	it("never overwrites a pdf the note already links", async () => {
+		const note = makeNote({ fm: { doi: "10.1000/xyz", pdf: "[[mine.pdf]]" } });
+		expect(await setPdfLink(note.app, note.file, "file:///z/a.pdf")).toBe(false);
+		expect(note.fm()?.pdf).toBe("[[mine.pdf]]");
+	});
+});
+
+describe("readFrontmatterTags", () => {
+	it("reads a list, dropping a leading # and blanks", () => {
+		expect(readFrontmatterTags(["#ml", "theory", " ", null])).toEqual(["ml", "theory"]);
+	});
+
+	it("reads a comma- or space-separated string", () => {
+		expect(readFrontmatterTags("ml, theory #optics")).toEqual(["ml", "theory", "optics"]);
+	});
+
+	it("reads a missing or malformed value as no tags", () => {
+		expect(readFrontmatterTags(undefined)).toEqual([]);
+		expect(readFrontmatterTags({ tag: "ml" })).toEqual([]);
+	});
+});
+
+describe("LiteratureNoteManager.getTags", () => {
+	const tags = (fm: Record<string, unknown> | null): string[] => {
+		const note = makeNote({ fm });
+		return new LiteratureNoteManager(note.app, "papers").getTags(note.file);
+	};
+
+	it("reads every tag in order", () => {
+		expect(tags({ doi: "10.1/x", tags: ["optics", "#ml"] })).toEqual(["optics", "ml"]);
+	});
+
+	it("is empty for an untagged or frontmatter-less note", () => {
+		expect(tags({ doi: "10.1/x", tags: [] })).toEqual([]);
+		expect(tags(null)).toEqual([]);
+	});
+});
+
+describe("linkPdf", () => {
+	const note = "papers/A.md";
+
+	it("writes a wikilink to the PDF", async () => {
+		const vault = makeVault({ [note]: { fm: { doi: null } } });
+		await linkPdf(vault.app, vault.file(note), "PDFs/A (B) (2020).pdf");
+		expect(vault.notes.get(note)!.fm!.pdf).toBe("[[PDFs/A (B) (2020).pdf]]");
+	});
+
+	it("fills a null placeholder", async () => {
+		const vault = makeVault({ [note]: { fm: { pdf: null } } });
+		await linkPdf(vault.app, vault.file(note), "x.pdf");
+		expect(vault.notes.get(note)!.fm!.pdf).toBe("[[x.pdf]]");
+	});
+
+	it("leaves an existing link alone, so repeating it changes nothing", async () => {
+		const vault = makeVault({ [note]: { fm: { pdf: "[[mine.pdf]]" } } });
+		await linkPdf(vault.app, vault.file(note), "x.pdf");
+		await linkPdf(vault.app, vault.file(note), "x.pdf");
+		expect(vault.notes.get(note)!.fm!.pdf).toBe("[[mine.pdf]]");
+	});
+});
+
+describe("PDF line in the note body", () => {
+	const body = (opts: { arxiv?: boolean; notes?: string } = {}) =>
+		scaffold(opts).replace(/^---[\s\S]*?---\n/, "");
+
+	it("labels a vault PDF as a short wikilink", () => {
+		expect(pdfBodyLine("[[PDFs/A (B) (2020).pdf]]")).toBe("**PDF**: [[PDFs/A (B) (2020).pdf|Open PDF]]");
+		expect(pdfBodyLine("[[a.pdf|old label]]")).toBe("**PDF**: [[a.pdf|Open PDF]]");
+	});
+
+	it("labels a file URL as a markdown link that survives spaces", () => {
+		expect(pdfBodyLine("file:///z/My%20Paper.pdf")).toBe("**PDF**: [Open PDF](<file:///z/My%20Paper.pdf>)");
+	});
+
+	it("goes right below the arXiv line", () => {
+		const lines = insertPdfLine(body(), "[[a.pdf]]")!.split("\n");
+		const arxiv = lines.findIndex((l) => l.startsWith("**arXiv**"));
+		expect(lines[arxiv + 1]).toBe("**PDF**: [[a.pdf|Open PDF]]");
+	});
+
+	it("goes below the last metadata line when there is no arXiv ID", () => {
+		const lines = insertPdfLine(body({ arxiv: false }), "[[a.pdf]]")!.split("\n");
+		const doi = lines.findIndex((l) => l.startsWith("**DOI**"));
+		expect(lines[doi + 1]).toBe("**PDF**: [[a.pdf|Open PDF]]");
+	});
+
+	it("ignores metadata-looking lines the user wrote under their notes", () => {
+		const out = insertPdfLine(body({ notes: "**Year**: mine" }), "[[a.pdf]]")!;
+		expect(out.indexOf("**PDF**")).toBeLessThan(out.indexOf("## Notes"));
+	});
+
+	it("adds nothing when the note already has a PDF line or no metadata", () => {
+		expect(insertPdfLine(insertPdfLine(body(), "[[a.pdf]]")!, "[[b.pdf]]")).toBeNull();
+		expect(insertPdfLine("# Title\n\nmy own text", "[[a.pdf]]")).toBeNull();
+	});
+
+	it("setPdfLink writes the line, and adds it to a note whose property came first", async () => {
+		const fresh = makeNote({ fm: { pdf: null }, body: body() });
+		await setPdfLink(fresh.app, fresh.file, "[[x.pdf]]");
+		expect(fresh.body()).toContain("**PDF**: [[x.pdf|Open PDF]]");
+
+		const older = makeNote({ fm: { pdf: "[[mine.pdf]]" }, body: body() });
+		await setPdfLink(older.app, older.file, "[[x.pdf]]");
+		expect(older.body()).toContain("**PDF**: [[mine.pdf|Open PDF]]");
+		await setPdfLink(older.app, older.file, "[[x.pdf]]");
+		expect(older.body().match(/\*\*PDF\*\*/g)).toHaveLength(1);
+	});
+});
+
+describe("bodyHasUserContent and the PDF line", () => {
+	it("does not count the generated PDF line as notes", () => {
+		const withPdf = insertPdfLine(scaffold(), "[[a.pdf]]")!;
+		expect(withPdf).toContain("**PDF**");
+		expect(bodyHasUserContent(withPdf)).toBe(false);
 	});
 });

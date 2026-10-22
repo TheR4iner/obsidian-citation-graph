@@ -30,11 +30,11 @@ Zoomed out, the shape of the literature shows: papers are placed left to right b
 
 **Read through it.** Every paper carries a reading status painted as its node colour, so a canvas doubles as a reading list: *to read*, *reading*, *read*, *read with notes written*, and *abandoned*. Set them one at a time, cycle them from a hotkey, or repaint a whole canvas at once.
 
-**Fill it in.** *Download* fetches PDFs from arXiv. *Write summary* sends a PDF to Anthropic, OpenAI, Google Gemini, or a local Claude CLI and writes a structured summary into the note, with a progress bar and a token budget you can cap.
+**Fill it in.** Papers added to a canvas are looked up in Zotero by DOI, and a PDF Zotero stores is linked from the note's `pdf` property. *Download* fetches PDFs from arXiv. *Write summary* sends a PDF to Anthropic, OpenAI, Google Gemini, or a local Claude CLI and writes a structured summary into the note, with a progress bar and a token budget you can cap.
 
 **Ask for more.** *Recommend papers* describes the whole canvas to the same LLM and asks what else belongs on it, searching the web where the provider supports it. Every suggestion is checked against a citation database before you see it, so invented papers never reach the picker, and the ones that survive are offered in the same checkbox list *Expand paper* uses.
 
-**Keep it tidy.** *Sync canvas to Zotero* pushes new papers back. *Send papers to canvas* copies or moves papers with their edges between canvases. *Relayout canvas* re-sorts by year. *Delete paper* removes the node, its edges and the note together, which Obsidian's own delete does not.
+**Keep it tidy.** *Sync canvas to Zotero* pushes new papers back. *Send papers to canvas* copies or moves papers with their edges between canvases. *Relayout canvas* re-sorts by year, and *Group papers by tag* gathers papers into overlapping labelled groups, one per tag, from their notes' `tags`. *Delete paper* removes the node, its edges and the note together, which Obsidian's own delete does not.
 
 ## Requirements
 
@@ -52,7 +52,7 @@ Nothing here happens without you running a command, and nothing is collected abo
 
 | Service | When | What is sent |
 | --- | --- | --- |
-| Zotero local API, `localhost:23119` | *Create from collection*, *Create from tag* | Nothing leaves your machine |
+| Zotero local API, `localhost:23119` | *Create from collection*, *Update from collection*, *Create from tag*; looking up the PDF of each paper added to a canvas (unless *Link Zotero PDFs* is off) and *PDFs: link from Zotero* | Nothing leaves your machine. The PDF lookup sends each paper's DOI to Zotero |
 | `api.semanticscholar.org` | Resolving papers and their citation links | DOIs, arXiv IDs, paper titles |
 | `api.openalex.org` | Extra references and citing works when expanding a paper or resolving edges; papers Semantic Scholar cannot resolve; finding an arXiv preprint behind a publisher DOI | DOIs, and your contact email if you set one |
 | `api.crossref.org` | Reference lists, and their order, when expanding a paper or resolving edges; papers the above cannot resolve | DOIs, and your contact email if you set one |
@@ -93,13 +93,15 @@ A first run over a large collection takes a few minutes, and a [Semantic Scholar
 
 All are in the command palette under `Citation Graph:`, grouped by a second prefix so that typing the group narrows the list: **Canvas**, **Papers**, **Reading**, **PDFs**, **Maintenance**. The rest of this page refers to each command by its short name.
 
-Only three of them work without a canvas open: *Create from collection*, *Create from tag* and *Clear Semantic Scholar cache*. The other fifteen are hidden from the palette until a canvas is open, so the list stays short while you are reading a note.
+Only three of them work without a canvas open: *Create from collection*, *Create from tag* and *Clear Semantic Scholar cache*. The other eighteen are hidden from the palette until a canvas is open, so the list stays short while you are reading a note.
 
 | Command | What it does |
 |---|---|
 | **Canvas: create from collection** | Builds a canvas from a Zotero collection, into `<collections folder>/<collection name>/` |
+| **Canvas: update from collection** | Adds the papers that joined the canvas's Zotero collection since it was built, in a new group beside the canvas, without moving anything. See [Updating from the collection](#updating-from-the-collection) |
 | **Canvas: create from tag** | Builds a canvas from an intersection of Zotero tags, into a folder named after the tags |
-| **Canvas: relayout** | Re-sorts nodes chronologically, discarding manual positions |
+| **Canvas: relayout** | Re-sorts nodes chronologically, discarding manual positions, tag groups and *New from Zotero* groups |
+| **Canvas: group papers by tag** | Arranges papers into overlapping labelled groups, one per tag, discarding manual positions. See [Grouping by tag](#grouping-by-tag) |
 | **Canvas: resolve missing citation edges** | Re-checks every paper on the canvas and draws the edges it is missing; **(force refresh)** bypasses the local cache |
 | **Canvas: sync to Zotero** | Pushes the canvas's papers back to a Zotero collection |
 | **Canvas: send papers to another canvas** | Copies or moves papers, with their edges, to another canvas |
@@ -110,7 +112,8 @@ Only three of them work without a canvas open: *Create from collection*, *Create
 | **Reading: set paper status** | Sets the selected papers to *to read*, *reading*, *read*, or *abandoned* |
 | **Reading: cycle reading status** | Advances the selection one step through *to read*, *reading*, *read*. Good on a hotkey |
 | **Reading: refresh reading status** | Repaints every paper on the canvas from its note |
-| **PDFs: download** | Fetches PDFs for papers on the canvas |
+| **PDFs: download** | Fetches PDFs for papers on the canvas and links each from its paper note |
+| **PDFs: link from Zotero** | Looks every paper on the canvas up in Zotero by DOI and links the PDF Zotero stores from its note. See [Zotero PDF links](#zotero-pdf-links) |
 | **PDFs: write summary** | Writes an LLM summary into the note under `## Summary` |
 | **Maintenance: clear Semantic Scholar cache** | Drops cached reference data if you suspect it is stale |
 
@@ -145,6 +148,31 @@ The same paper in four of the five states, at the default colours. The fifth, *R
 
 **"Read + notes written" is derived, not stored.** A paper reaches it when it is marked *Read* **and** its note contains anything beyond the generated template: your own prose, an added heading, a checklist, or a summary from *Write summary*. Both halves are required, so a paper you have not read yet is never labelled as read, however much has been written into its note. It is absent from the status picker for the same reason it exists at all, and it is why *Refresh reading status* exists: writing notes into a paper you have already read changes its appearance with no command involved.
 
+### Updating from the collection
+
+A canvas made with *Create from collection* remembers its collection. After adding references to that collection in Zotero, **Update from collection** brings just the new ones onto the canvas, so a canvas you have rearranged and annotated never has to be rebuilt.
+
+- **Only papers not already on the canvas are added.** A paper counts as present when the canvas has a node for it or a literature note with the same DOI, arXiv ID or Semantic Scholar ID, so a paper you added by DOI or by expanding another one is not added twice. Removing a paper from the canvas and running the command again brings it back.
+- **Nothing on the canvas moves.** The new cards go into one group labelled *New from Zotero* with the date, placed to the right of everything else, in a grid ordered by year. Your cards, your own nodes, reading-status colours and tag groups are left exactly as they were; drag the new cards where you want them, or run *Group papers by tag* or *Relayout* if you want the whole canvas rearranged. Both remove the *New from Zotero* group, since its papers move out of it.
+- **Citation arrows are drawn** between the new papers and the ones already there, in both directions, and among the new papers themselves.
+- **Each new paper gets a literature note** in the canvas's folder, as on creation. A note that already exists for the paper is reused.
+
+The closing notice says how many papers were added and how many arrows drawn, how many could not be found on Semantic Scholar (they are still added, from Zotero's metadata, but without arrows) and how many were skipped for having neither a DOI nor an arXiv ID. A canvas built from tags or by hand has no collection to update from; the command says so and changes nothing. Zotero must be running, as for *Create from collection*.
+
+### Grouping by tag
+
+Paper notes carry ordinary Obsidian tags in their `tags` frontmatter, which new notes get as an empty list ready to fill. *Group papers by tag* reads them and rearranges the canvas into one labelled group per tag. Papers with no tag go in a separate *Untagged* group.
+
+- **A paper with several tags sits where their groups overlap.** Obsidian counts a card as belonging to every group whose rectangle contains it, so a paper tagged `#optics` and `#ml` is placed inside both the *#optics* and the *#ml* rectangle, and outside every group whose tag it does not have. Each paper stays a single card, so its citation arrows are untouched.
+- **At most three tags per paper.** A paper with more is not placed by tag: it goes in a *Too many tags* group, and a notice that stays until you dismiss it names it. Trim its tags and run the command again.
+- **Not every mix of tags can be drawn with rectangles.** With many tags sharing papers, there may be no way to place the rectangles so that every combination gets a region of its own; the number of regions rectangles can form grows more slowly than the number of three-tag combinations. The command searches for the placement that fits as many papers as it can. A paper whose exact combination still has no region goes in a *Tag combination not drawable* group, and a notice names it. A paper is never placed inside a group whose tag it lacks. Tags that never share a paper are drawn apart from each other, so the search only has to untangle tags that actually overlap.
+- **Inside each region**, papers keep the left-to-right order they had, so a canvas laid out by year stays in publication order, filled column by column into a roughly square grid.
+- **Arrows, reading-status colours and labels are kept**, because the cards are moved rather than recreated.
+- **Your own nodes stay put**: text cards, links, notes that are not papers, and groups you drew yourself. The tag groups start where the papers' top-left corner was, so they can end up over your own nodes.
+- **Running it again** replaces the groups it drew last time and gives the same layout for the same tags, so retag papers and re-run freely. *Relayout* goes back to the timeline and removes the tag groups.
+
+Tags are matched without regard to case, as Obsidian does, and only the frontmatter `tags` are read, not inline `#tags` in the note body.
+
 ### Reading an abstract in the picker
 
 Each picker row shows the first 200 characters of the paper's abstract, followed by a **Show more** link when there is more to read. It unfolds the full abstract in place, and **Show less** folds it back. Unfolded abstracts stay open while you search, filter by year or ban a row, so deciding on a paper never means closing the dialog.
@@ -163,11 +191,19 @@ The list lives in the canvas file, so it travels with the canvas. Review it, or 
 
 **Download** saves as `Title (FirstAuthor) (Year).pdf` in a folder of your vault, created if it does not exist. With exactly one paper selected and a download folder already known (the canvas's last one, or the *Default download folder* setting), it downloads straight away; otherwise it opens a picker where you choose the papers and the folder, with your vault's folders suggested as you type. Papers already in the folder are marked `downloaded` and left unchecked.
 
+**Each downloaded PDF is linked from its paper note**, as a `pdf` frontmatter property holding a wikilink such as `pdf: "[[Papers/PDFs/Title (Author) (Year).pdf]]"`, so the file opens from the note and Obsidian keeps the link current if you move or rename it. A `pdf` value already in the note is left as it is, so downloading again never adds a second link and never replaces one you set yourself. The note body also gets an *Open PDF* link to the same file, which shows on the paper's canvas card. See [Literature notes](#literature-notes). The same happens when *Write summary* downloads a missing PDF. Characters a wikilink cannot carry (`#`, `^`, `[`, `]`) are left out of the filename.
+
 Versions before 0.7.0 saved PDFs anywhere on disk. A stored folder that points inside the vault, even written as an absolute or `~` path, keeps working. One that points outside it is refused with a message: pick a vault folder and move the PDFs you already have into it.
 
 **arXiv is always checked before a paper is called unavailable.** A paper added by the DOI of its published version usually has no arXiv ID recorded, because Semantic Scholar files the preprint and the journal article as two unrelated records; the preprint is on arXiv all the same. Such a paper is marked `no ID yet` and left unticked, so a large canvas does not open with dozens of lookups queued, but it stays selectable. Selecting it makes the download run look the paper up: first through the arXiv-minted DOI, then through OpenAlex's record of where the DOI is hosted, then by searching arXiv for the exact title. Any ID found is written into the note's frontmatter, so the next run needs no lookup.
 
 Only arXiv ships configured, so a paper with no arXiv version cannot be fetched. Adding a source is a code change: see [Adding a PDF download source](#adding-a-pdf-download-source).
+
+### Zotero PDF links
+
+**Each paper added to a canvas is looked up in Zotero by its DOI**, whether it arrives from a collection, a tag, *Expand paper*, *Add paper by DOI or arXiv* or *Recommend papers*. When Zotero holds the paper and its best attachment (the one Zotero itself opens first, a PDF when there is one) is a PDF present on this computer, the note's `pdf` property gets a link to it: a wikilink when Zotero's file sits inside the vault, otherwise a `file://` link that opens in your system's PDF viewer. A `pdf` value already in the note is never replaced, so a link you set yourself, or one an earlier run wrote, stays.
+
+The search covers your personal library and every group library. Only a file on this computer whose name ends in `.pdf` is linked, never one on a network share. Papers without a DOI are skipped, and so is a PDF that Zotero lists but has not downloaded (for instance when file sync downloads on demand). If Zotero is not running, one notice says so and the papers are added all the same; run **PDFs: link from Zotero** later to check the whole canvas again. Turn the automatic check off with *Link Zotero PDFs* under Settings, Zotero; the command still works.
 
 ### Recommend papers
 
@@ -209,8 +245,9 @@ Every setting is indexed by Obsidian's settings search. The settings tab present
 |---|---|---|
 | **Zotero API key** | Needed only for *Sync canvas to Zotero* | |
 | **Zotero user ID** | Numeric ID shown at zotero.org, Settings, Security, Applications | |
+| **Link Zotero PDFs** | Look papers added to a canvas up in Zotero by DOI and link the PDF Zotero stores from the note's `pdf` property. See [Zotero PDF links](#zotero-pdf-links) | On |
 
-Reading a collection needs neither: that goes through Zotero's local API, which is unauthenticated.
+Reading a collection and linking its PDFs need neither: that goes through Zotero's local API, which is unauthenticated.
 
 ### Semantic Scholar
 
@@ -304,22 +341,28 @@ doi: "10.48550/arXiv.1706.03762"
 arxiv: "1706.03762"
 citekey: "vaswani2017attention"
 semantic_scholar_id: "204e3073870fae3d05bcbc2f6a8e263d9b72e776"
+pdf: "[[Papers/PDFs/Attention Is All You Need (Ashish Vaswani) (2017).pdf]]"
 status: unread
+tags: []
 cssclasses:
   - citation-graph-note
   - citation-graph-status-unread
 ---
 ```
 
-The body carries a title heading, an author/year/DOI/arXiv block, a `## Summary` section written by *Write summary*, and a `## Notes` section for you.
+The body carries a title heading, an author/year/DOI/arXiv block (plus an *Open PDF* link once the PDF is known), a `## Summary` section written by *Write summary*, and a `## Notes` section for you.
+
+`pdf` is added once the paper's PDF is known: when it is downloaded (see [Download](#download)) or found in Zotero (see [Zotero PDF links](#zotero-pdf-links)). The plugin only ever fills it when empty. Whenever it links a PDF, it also adds a `**PDF**: Open PDF` line to the body, below the arXiv line, linking the same file, so the PDF opens from the note and from its card on the canvas, which does not show properties. A note that already has a PDF line, or whose author/year/DOI/arXiv block you removed, is left alone, and the line never makes a paper count as *Read + notes written*.
 
 `status` holds one of `unread`, `reading`, `read` or `abandoned`, which the interface labels *To read*, *Reading*, *Read* and *Abandoned*. *Read + notes written* has no stored value: it is derived, from `read` plus content in the note's body.
+
+`tags` is yours: the plugin never writes to it after creating the note. *Group papers by tag* places each paper in the overlap of its tags' groups, and accepts at most three tags per paper.
 
 `cssclasses` carries `citation-graph-note`, which marks the note as a paper, and one `citation-graph-status-*` class the canvas styling reads. Both are rewritten whenever the plugin paints a canvas, so edit `status` rather than the class; any classes of your own are left where they are.
 
 ## How it works
 
-The **Zotero local API** on `localhost:23119` reads collections and items, needing no authentication. **Semantic Scholar** resolves papers by DOI or arXiv ID and supplies citation relationships; **OpenAlex**, **arXiv** and **Crossref** cover papers it does not know. The **Zotero Web API** writes papers back and needs your API key. For summaries, Anthropic and Google take the PDF natively while OpenAI receives it as a file attachment.
+The **Zotero local API** on `localhost:23119` reads collections and items and finds each paper's stored PDF, needing no authentication. **Semantic Scholar** resolves papers by DOI or arXiv ID and supplies citation relationships; **OpenAlex**, **arXiv** and **Crossref** cover papers it does not know. The **Zotero Web API** writes papers back and needs your API key. For summaries, Anthropic and Google take the PDF natively while OpenAI receives it as a file attachment.
 
 ## Limitations
 

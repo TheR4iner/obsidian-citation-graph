@@ -1,6 +1,7 @@
 /// <reference types="node" />
 import * as os from "os";
 import * as path from "path";
+import { fileURLToPath } from "url";
 
 /**
  * Every PDF path this plugin uses is built here, as a path inside the vault.
@@ -107,4 +108,18 @@ export function isInside(target: string, root: string): boolean {
 export function estimatePdfPages(data: ArrayBuffer): number {
   const matches = new TextDecoder("latin1").decode(data).match(/\/Type\s*\/Page[^s]/g);
   return matches ? matches.length : 0;
+}
+
+/**
+ * The `pdf` property value for a PDF outside Obsidian's control, given as a
+ * `file://` URL: a wikilink when the file lies inside the vault, so Obsidian
+ * opens it itself and keeps the link current, otherwise the URL, which
+ * Obsidian hands to the system's PDF viewer.
+ */
+export function pdfLinkValue(fileUrl: string, vaultBasePath: string | null): string {
+  const filePath = fileURLToPath(fileUrl);
+  if (vaultBasePath && isInside(filePath, vaultBasePath)) {
+    return `[[${path.relative(path.resolve(vaultBasePath), path.resolve(filePath)).split(path.sep).join("/")}]]`;
+  }
+  return fileUrl;
 }

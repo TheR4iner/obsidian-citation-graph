@@ -23,7 +23,7 @@ The problem it solves: Semantic Scholar files a preprint and the journal article
 
 **Query building.** `searchByTitle` strips everything but letters, digits and spaces before quoting the phrase, because a colon or bracket in a title makes arXiv reject the query outright, and caps it at the first 20 words.
 
-An ID discovered during a run comes back in `DownloadOutcome.resolvedArxiv`, keyed by note path, and `recordArxivIds` in `main.ts` writes it into frontmatter so the next run needs no lookup.
+An ID discovered during a run comes back in `DownloadOutcome.resolvedArxiv`, keyed by note path, and `recordDownload` in `main.ts` writes it into frontmatter so the next run needs no lookup.
 
 ## Open questions
 

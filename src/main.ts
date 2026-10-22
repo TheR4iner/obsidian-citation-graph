@@ -8,6 +8,7 @@ import {
   FuzzySuggestModal,
   Modal,
   ButtonComponent,
+  moment,
   type WorkspaceLeaf,
 } from "obsidian";
 import { initLog, logNotice, logOnly } from "./log";
@@ -35,7 +36,7 @@ import {
   STATUS_LABELS,
 } from "./types";
 import { CitationGraphSettingTab } from "./settings";
-import { ZoteroClient } from "./api/zotero";
+import { ZoteroClient, ZoteroUnreachableError } from "./api/zotero";
 import { SemanticScholarClient } from "./api/semantic-scholar";
 import { OpenAlexClient } from "./api/openalex";
 import { CrossRefClient } from "./api/crossref";
@@ -48,7 +49,8 @@ import { CollectionPickerModal } from "./modals/collection-picker";
 import { TagPickerModal } from "./modals/tag-picker";
 import { ExpandPickerModal } from "./modals/expand-picker";
 import { DownloadPickerModal, downloadPapers, buildPaperFilename } from "./modals/download-picker";
-import { estimatePdfPages, fileInFolder, vaultFolder } from "./paper-files";
+import type { DownloadOutcome } from "./modals/download-picker";
+import { estimatePdfPages, fileInFolder, pdfLinkValue, vaultFolder } from "./paper-files";
 import { SendPickerModal } from "./modals/send-picker";
 import { RecommendPromptModal } from "./modals/recommend-prompt-modal";
 import { RecommendPickerModal } from "./modals/recommend-picker";
@@ -56,12 +58,28 @@ import { StatusPickerModal } from "./modals/status-picker";
 import { PromiseModal } from "./modals/promise-modal";
 import { askChoice } from "./modals/choice-modal";
 import type { BannedPaper } from "./types";
-import { LiteratureNoteManager, readFrontmatterArxiv } from "./notes/literature";
+import { LiteratureNoteManager, linkPdf, readFrontmatterArxiv, setPdfLink } from "./notes/literature";
 import { hasSummarySection, insertSummaryText } from "./notes/summary-text";
 import { buildCanvas, expandCanvas, resolveNewEdges } from "./canvas/builder";
 import { parseCanvasData } from "./canvas/parse";
+import {
+  isTagGroup,
+  layoutByTag,
+  MAX_TAGS_PER_PAPER,
+  TOO_MANY_TAGS_LABEL,
+  UNDRAWABLE_LABEL,
+  type TagLayoutResult,
+} from "./canvas/tag-layout";
 import { registerCanvasPaperMenu } from "./canvas/node-menu";
-import { hasPaperNode, resolvePaperNodeId, layoutPapers, layoutNewPapers } from "./canvas/layout";
+import {
+  hasPaperNode,
+  resolvePaperNodeId,
+  layoutPapers,
+  layoutNewPapers,
+  placeInNewGroup,
+  isUpdateGroup,
+  UPDATE_GROUP_PREFIX,
+} from "./canvas/layout";
 import { S2RefCache } from "./api/s2-cache";
 import * as path from "path";
 import { summarizePaper, effectiveModel, providerSupportsWebSearch } from "./api/llm";
@@ -173,6 +191,13 @@ function paperFromFrontmatter(
   };
 }
 
+/** Papers named by their note's file name, for a notice: the first five, then a count. */
+function namePapers(notePaths: string[]): string {
+  const names = notePaths.slice(0, 5).map((p) => p.replace(/^.*\//, "").replace(/\.md$/, ""));
+  const more = notePaths.length - names.length;
+  return names.join(", ") + (more > 0 ? ` and ${more} more` : "");
+}
+
 /** The note path behind every paper node on a canvas. */
 function notePathsOf(nodes: CanvasNode[]): string[] {
   return nodes
@@ -259,8 +284,15 @@ export default class CitationGraphPlugin extends Plugin {
         "Canvas: resolve missing citation edges (force refresh)",
         () => this.resolveMissingEdges({ forceRefresh: true }),
       ],
+      ["relayout-by-tag", "Canvas: group papers by tag", () => this.relayoutByTag()],
+      [
+        "update-from-collection",
+        "Canvas: update from collection",
+        () => this.updateFromCollection(),
+      ],
       ["sync-to-zotero", "Canvas: sync to Zotero", () => this.syncToZotero()],
       ["download-papers", "PDFs: download", () => this.downloadPapersFromCanvas()],
+      ["link-zotero-pdfs", "PDFs: link from Zotero", () => this.linkZoteroPdfsOnCanvas()],
       ["add-paper-by-doi", "Papers: add by DOI or arXiv", () => this.addPaperByDoi()],
       [
         "refresh-reading-status",
@@ -438,27 +470,30 @@ export default class CitationGraphPlugin extends Plugin {
   }
 
   /**
-   * Write arXiv IDs discovered during a download back into their notes, so the
-   * next run finds them recorded and skips the lookup.
+   * Write what a download learned back into the paper notes: arXiv IDs a
+   * lookup found, so the next run skips the lookup, and a `pdf` link to each
+   * saved file. A paper with no note keeps its file and gets no link.
    */
-  private async recordArxivIds(found: Map<string, string>): Promise<void> {
-    for (const [notePath, arxivId] of found) {
+  private async recordDownload(outcome: DownloadOutcome): Promise<void> {
+    const edit = async (notePath: string, what: string, write: (file: TFile) => Promise<void>) => {
       const noteFile = this.app.vault.getAbstractFileByPath(notePath);
-      if (!(noteFile instanceof TFile)) continue;
+      if (!(noteFile instanceof TFile)) return;
       try {
-        await this.app.fileManager.processFrontMatter(
-          noteFile,
-          (fm: Record<string, unknown>) => {
-            if (readFrontmatterArxiv(fm)) return;
-            fm.arxiv = arxivId;
-          }
-        );
+        await write(noteFile);
       } catch (e) {
-        console.error(
-          `Citation Graph: could not record the arXiv ID on ${notePath}`,
-          e
-        );
+        console.error(`Citation Graph: could not record ${what} on ${notePath}`, e);
       }
+    };
+    for (const [notePath, arxivId] of outcome.resolvedArxiv) {
+      await edit(notePath, "the arXiv ID", (file) =>
+        this.app.fileManager.processFrontMatter(file, (fm: Record<string, unknown>) => {
+          if (readFrontmatterArxiv(fm)) return;
+          fm.arxiv = arxivId;
+        })
+      );
+    }
+    for (const [notePath, pdfPath] of outcome.savedPdfs) {
+      await edit(notePath, "the PDF link", (file) => linkPdf(this.app, file, pdfPath));
     }
   }
 
@@ -572,6 +607,176 @@ export default class CitationGraphPlugin extends Plugin {
     }
   }
 
+  // ─── Update from Collection ─────────────────────────────────
+
+  /**
+   * Bring the papers added to a canvas's source collection since it was
+   * created onto the canvas, without rebuilding it.
+   *
+   * Nothing already on the canvas moves or changes: the new cards go into one
+   * labelled group beside the current bounding box, and the only other change
+   * is the citation edges between them and the papers already there. Which
+   * papers count as new is decided again at write time, so a paper the user
+   * added by hand meanwhile is not placed twice.
+   */
+  private async updateFromCollection(): Promise<void> {
+    const progress = new ProgressNotice("Updating from Zotero");
+    try {
+      const activeFile = this.findActiveCanvas();
+      if (!activeFile) {
+        logNotice("Open a citation graph canvas first, then run this command.");
+        return;
+      }
+      const canvasData = await this.readCanvas<CanvasMeta>(activeFile);
+      const collectionKey = canvasData.citationGraphMeta?.zoteroCollectionKey;
+      if (!collectionKey) {
+        logNotice(
+          "This canvas was not created from a Zotero collection, so there is no collection to update from."
+        );
+        return;
+      }
+
+      // The canvas records only the collection key. Looking it up again finds
+      // the group library it lives in, and its current name.
+      progress.setStatus("Reading the Zotero collection");
+      const keys = resolveApiKeys(this.settings);
+      const zotero = new ZoteroClient(keys.zoteroApiKey, keys.zoteroUserId);
+      const collection = (await zotero.getCollections()).find((c) => c.key === collectionKey);
+      if (!collection) {
+        logNotice(
+          "The Zotero collection this canvas was created from was not found. Is Zotero running, and does the collection still exist?"
+        );
+        return;
+      }
+      const name = collection.data.name;
+      const items = await zotero.getCollectionItems(collectionKey, collection.data.groupId);
+
+      const existing = this.papersOnNodes(canvasData.nodes);
+      const existingIds = this.canvasPaperIds(existing);
+      const existingArxiv = new Set(existing.map((p) => p.arxiv).filter(Boolean));
+      const nodeIds = new Set(canvasData.nodes.map((n) => n.id));
+      const onCanvas = (paper: Paper): boolean =>
+        hasPaperNode(paper, nodeIds) ||
+        (!!paper.doi && existingIds.has(`doi:${paper.doi.toLowerCase()}`)) ||
+        (!!paper.arxiv && existingArxiv.has(paper.arxiv)) ||
+        (!!paper.semanticScholarId && existingIds.has(paper.semanticScholarId));
+
+      let withoutId = 0;
+      const candidates = new Map<string, Paper>();
+      for (const item of items) {
+        const paper = zoteroItemToPaper(item);
+        if (!paper) withoutId++;
+        else if (!onCanvas(paper)) candidates.set(paper.id, paper);
+      }
+      const skippedNote =
+        withoutId > 0 ? ` (${withoutId} without a DOI or arXiv ID skipped).` : ".";
+      if (candidates.size === 0) {
+        logNotice(`The canvas already has every paper in "${name}"${skippedNote}`);
+        return;
+      }
+
+      // Existing papers go into the same batch so that edges in both
+      // directions come out of one response: a new paper's references give
+      // new -> existing, an existing paper's give existing -> new.
+      progress.setStatus(`Resolving ${candidates.size} new papers on Semantic Scholar`);
+      const batchIds = [...candidates.values(), ...existing]
+        .map(s2BatchId)
+        .filter((id): id is string => id !== null);
+      const s2Papers = await this.withS2Progress(progress, () =>
+        this.s2Client.getPaperBatch(batchIds, undefined, true)
+      );
+
+      let unresolved = 0;
+      const newPapers: Paper[] = [];
+      for (const paper of candidates.values()) {
+        if (!enrichFromBatch(paper, s2Papers)) unresolved++;
+        // A preprint and its published version carry different DOIs but are
+        // one S2 paper, and one of them may already be on the canvas.
+        else if (onCanvas(paper)) continue;
+        newPapers.push(paper);
+      }
+      if (newPapers.length === 0) {
+        logNotice(`The canvas already has every paper in "${name}"${skippedNote}`);
+        return;
+      }
+
+      const s2IdToPaperId = new Map<string, string>();
+      for (const paper of existing) {
+        const s2 = s2Papers.get(
+          paper.doi?.toLowerCase() || paper.arxiv || paper.semanticScholarId || ""
+        );
+        if (s2) s2IdToPaperId.set(s2.paperId, paper.id);
+      }
+      for (const paper of newPapers) {
+        if (paper.semanticScholarId) s2IdToPaperId.set(paper.semanticScholarId, paper.id);
+      }
+      const newIds = new Set(newPapers.map((p) => p.id));
+      const edges: CitationEdge[] = [];
+      for (const e of SemanticScholarClient.buildCitationEdgesFromBatch(s2Papers)) {
+        const fromId = s2IdToPaperId.get(e.fromId);
+        const toId = s2IdToPaperId.get(e.toId);
+        if (fromId && toId && (newIds.has(fromId) || newIds.has(toId))) {
+          edges.push({ fromId, toId });
+        }
+      }
+
+      progress.setStatus(`Creating ${newPapers.length} literature notes`);
+      const noteFolder =
+        activeFile.parent?.path || normalizePath(this.settings.collectionsFolder);
+      await new LiteratureNoteManager(this.app, noteFolder).createNotes(newPapers);
+      // Only the new notes: existing nodes keep whatever colour they have.
+      const colors = await this.resolveStatusColors(
+        newPapers.map((p) => p.notePath).filter((p): p is string => !!p)
+      );
+
+      const paperIndex = this.indexPapers([...existing, ...newPapers]);
+      let added = 0;
+      let edgeCount = 0;
+      await this.updateCanvas<CanvasMeta>(activeFile, (canvas) => {
+        const ids = new Set(canvas.nodes.map((n) => n.id));
+        const toPlace = newPapers.filter((p) => !hasPaperNode(p, ids));
+        if (toPlace.length === 0) return false;
+        const placed = placeInNewGroup(
+          canvas.nodes,
+          toPlace,
+          {
+            id: `${UPDATE_GROUP_PREFIX}${Date.now().toString(36)}`,
+            label: `New from Zotero (${moment().format("YYYY-MM-DD")})`,
+          },
+          { nodeWidth: this.settings.nodeWidth, nodeHeight: this.settings.nodeHeight }
+        );
+        paintStatusColors(placed, colors);
+        const nodes = [...canvas.nodes, ...placed];
+        const addedEdges = resolveNewEdges(
+          canvas.edges,
+          new Set(nodes.map((n) => n.id)),
+          edges,
+          paperIndex
+        );
+        added = toPlace.length;
+        edgeCount = addedEdges.length;
+        return { ...canvas, nodes, edges: [...canvas.edges, ...addedEdges] };
+      });
+
+      progress.hide();
+      const detail: string[] = [];
+      if (unresolved > 0) {
+        detail.push(`${unresolved} not found on Semantic Scholar, added without citation edges`);
+      }
+      if (withoutId > 0) detail.push(`${withoutId} without a DOI or arXiv ID skipped`);
+      logNotice(
+        `Added ${added} paper${added === 1 ? "" : "s"} from "${name}" with ` +
+          `${edgeCount} citation edge${edgeCount === 1 ? "" : "s"}` +
+          (detail.length > 0 ? ` (${detail.join("; ")}).` : ".")
+      );
+    } catch (e) {
+      console.error("Citation Graph: Error updating canvas from collection", e);
+      logNotice(`Error: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      progress.hide();
+    }
+  }
+
   // ─── Create from Tag ────────────────────────────────────────
 
   private async createFromTag(): Promise<void> {
@@ -621,9 +826,8 @@ export default class CitationGraphPlugin extends Plugin {
 
       papers.set(paper.id, paper);
 
-      // Build S2-compatible ID
-      if (paper.doi) externalIds.push(`DOI:${paper.doi}`);
-      else if (paper.arxiv) externalIds.push(`ArXiv:${paper.arxiv}`);
+      const s2Id = s2BatchId(paper);
+      if (s2Id) externalIds.push(s2Id);
     }
 
     if (externalIds.length === 0) {
@@ -643,24 +847,7 @@ export default class CitationGraphPlugin extends Plugin {
       true,
     );
 
-    // Enrich our papers with S2 data
-    for (const paper of papers.values()) {
-      const s2Key = paper.doi
-        ? paper.doi.toLowerCase()
-        : paper.arxiv || "";
-      const s2Paper = s2Papers.get(s2Key);
-      if (s2Paper) {
-        paper.semanticScholarId = s2Paper.paperId;
-        if (!paper.arxiv && s2Paper.externalIds?.ArXiv)
-          paper.arxiv = s2Paper.externalIds.ArXiv;
-        if (!paper.doi && s2Paper.externalIds?.DOI)
-          paper.doi = s2Paper.externalIds.DOI;
-        if (!paper.year && s2Paper.year) paper.year = s2Paper.year;
-        if (s2Paper.citationCount != null)
-          paper.citationCount = s2Paper.citationCount;
-        if (s2Paper.abstract) paper.abstract = s2Paper.abstract;
-      }
-    }
+    for (const paper of papers.values()) enrichFromBatch(paper, s2Papers);
 
     // 3. Build citation edges from the batch response (no extra requests)
     const resolvedPapers = new Map<string, S2Paper>();
@@ -763,6 +950,7 @@ export default class CitationGraphPlugin extends Plugin {
     logNotice(
       `Citation graph created: ${papers.size} papers, ${edges.length} edges`
     );
+    await this.linkZoteroPdfs(Array.from(papers.values()), false);
   }
 
   // ─── Expand Paper ───────────────────────────────────────────
@@ -1038,6 +1226,7 @@ export default class CitationGraphPlugin extends Plugin {
       logNotice(
         `Added ${selected.length} papers to canvas.`
       );
+      await this.linkZoteroPdfs(newPapers, false);
     } catch (e) {
       console.error("Citation Graph: Error expanding paper", e);
       logNotice(`Error: ${e instanceof Error ? e.message : String(e)}`);
@@ -1169,6 +1358,7 @@ export default class CitationGraphPlugin extends Plugin {
         ? ""
         : ` (metadata from ${resolved.metadataSource})`;
       logNotice(`Added "${paper.title}" to canvas${sourceLabel}.`);
+      await this.linkZoteroPdfs([paper], false);
 
       if (resolved.references.length === 0 && resolved.citations.length === 0) {
         logNotice(
@@ -1714,6 +1904,73 @@ export default class CitationGraphPlugin extends Plugin {
       `Added ${newPapers.length} papers to canvas` +
       (withoutEdges > 0 ? ` (${withoutEdges} with no citation link to the canvas).` : ".")
     );
+    await this.linkZoteroPdfs(newPapers, false);
+  }
+
+  // ─── Zotero PDF links ───────────────────────────────────
+
+  /** The "PDFs: link from Zotero" command: check every paper on the active canvas. */
+  private async linkZoteroPdfsOnCanvas(): Promise<void> {
+    try {
+      const canvasFile = this.findActiveCanvas();
+      if (!canvasFile) {
+        logNotice("Open a citation graph canvas first, then run this command.");
+        return;
+      }
+      const canvasData = await this.readCanvas<CanvasMeta>(canvasFile);
+      await this.linkZoteroPdfs(this.papersOnNodes(canvasData.nodes), true);
+    } catch (e) {
+      console.error("Citation Graph: Error linking Zotero PDFs", e);
+      logNotice(`Error: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
+  /**
+   * Look each paper up in the local Zotero by DOI and link the PDF Zotero
+   * stores for it from the note's `pdf` property, leaving any existing value.
+   *
+   * Runs after papers are added (when the setting is on) and from the command.
+   * Zotero not running is reported once and ends the run without failing the
+   * add that triggered it. The automatic run stays quiet when it linked
+   * nothing, so adding papers without Zotero open costs one notice at most.
+   */
+  private async linkZoteroPdfs(papers: Paper[], manual: boolean): Promise<void> {
+    if (!manual && !this.settings.linkZoteroPdfs) return;
+    const candidates = papers.filter((p) => p.doi && p.notePath);
+    if (candidates.length === 0) {
+      if (manual) logNotice("No papers with a DOI on this canvas to look up in Zotero.");
+      return;
+    }
+
+    const zotero = new ZoteroClient("", "");
+    const vaultBase = this.fileSystemAdapter()?.getBasePath() ?? null;
+    let linked = 0;
+    let alreadyLinked = 0;
+    let failed = 0;
+    for (const paper of candidates) {
+      try {
+        const url = await zotero.findPdfFileUrl(paper.doi!);
+        if (!url) continue;
+        const file = this.app.vault.getAbstractFileByPath(paper.notePath!);
+        if (!(file instanceof TFile)) continue;
+        if (await setPdfLink(this.app, file, pdfLinkValue(url, vaultBase))) linked++;
+        else alreadyLinked++;
+      } catch (e) {
+        if (e instanceof ZoteroUnreachableError) {
+          logNotice(`Could not check Zotero for PDFs: ${e.message}`);
+          return;
+        }
+        failed++;
+        console.error(`Citation Graph: Zotero PDF lookup failed for ${paper.doi}`, e);
+        logOnly(`Zotero PDF lookup failed for ${paper.doi}: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+
+    if (!manual && linked === 0 && failed === 0) return;
+    const parts = [`Linked ${linked} PDF${linked === 1 ? "" : "s"} from Zotero`];
+    if (alreadyLinked > 0) parts.push(`${alreadyLinked} already linked`);
+    if (failed > 0) parts.push(`${failed} lookup${failed === 1 ? "" : "s"} failed, see the log`);
+    logNotice(`${parts.join(", ")}.`);
   }
 
   // ─── Download Papers ────────────────────────────────────
@@ -1813,7 +2070,7 @@ export default class CitationGraphPlugin extends Plugin {
           ? `Downloading "${chosenPapers[0].title}"...`
           : `Downloading ${chosenPapers.length} papers...`
       );
-      const { downloaded, failed, resolvedArxiv } = await downloadPapers(
+      const outcome = await downloadPapers(
         chosenPapers,
         downloadPath,
         adapter,
@@ -1825,7 +2082,8 @@ export default class CitationGraphPlugin extends Plugin {
           resolveArxiv: (paper) => this.findArxivId(paper),
         }
       );
-      await this.recordArxivIds(resolvedArxiv);
+      await this.recordDownload(outcome);
+      const { downloaded, failed } = outcome;
 
       // 9. Report results
       if (failed.length === 0) {
@@ -2086,6 +2344,71 @@ export default class CitationGraphPlugin extends Plugin {
       logNotice(`Refreshed reading status for ${papers} node${papers === 1 ? "" : "s"}.`);
     } catch (e) {
       console.error("Citation Graph: Error refreshing reading status", e);
+      logNotice(`Error: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
+  /**
+   * Rearrange the active canvas into one labelled group per paper tag.
+   *
+   * Tags come from the metadata cache, which is safe here: nothing in this
+   * command writes a note before reading it.
+   */
+  private async relayoutByTag(): Promise<void> {
+    try {
+      const canvasFile = this.findActiveCanvas();
+      if (!canvasFile) {
+        logNotice("Open a citation graph canvas first, then run this command.");
+        return;
+      }
+
+      if (!(await this.confirmPositionReset("Group papers by tag", "Group"))) return;
+
+      const canvasData = await this.readCanvas<CanvasMeta>(canvasFile);
+      const noteManager = new LiteratureNoteManager(
+        this.app,
+        normalizePath(this.settings.collectionsFolder)
+      );
+      const tagOf = new Map<string, string[]>();
+      for (const notePath of notePathsOf(canvasData.nodes)) {
+        const noteFile = this.app.vault.getAbstractFileByPath(notePath);
+        if (noteFile instanceof TFile && noteManager.isPaperNote(noteFile)) {
+          tagOf.set(notePath, noteManager.getTags(noteFile));
+        }
+      }
+      if (tagOf.size === 0) {
+        logNotice("No papers on this canvas to group.");
+        return;
+      }
+
+      // Reported from what was written, not from the snapshot read above.
+      const reported: Pick<TagLayoutResult, "tooManyTags" | "undrawable"> = {
+        tooManyTags: [],
+        undrawable: [],
+      };
+      await this.updateCanvas<CanvasMeta>(canvasFile, (canvas) => {
+        const result = layoutByTag(canvas.nodes, tagOf);
+        canvas.nodes = result.nodes;
+        reported.tooManyTags = result.tooManyTags;
+        reported.undrawable = result.undrawable;
+      });
+      const { tooManyTags, undrawable } = reported;
+
+      logNotice(`Grouped ${tagOf.size} paper${tagOf.size === 1 ? "" : "s"} by tag.`);
+      if (tooManyTags.length > 0) {
+        logNotice(
+          `${namePapers(tooManyTags)} ${tooManyTags.length === 1 ? "has" : "have"} more than ${MAX_TAGS_PER_PAPER} tags, so ${tooManyTags.length === 1 ? "it was" : "they were"} put in "${TOO_MANY_TAGS_LABEL}" instead of the tag groups.`,
+          0
+        );
+      }
+      if (undrawable.length > 0) {
+        logNotice(
+          `No arrangement of the tag groups could give ${namePapers(undrawable)} a region matching exactly ${undrawable.length === 1 ? "its" : "their"} tags, so ${undrawable.length === 1 ? "it was" : "they were"} put in "${UNDRAWABLE_LABEL}".`,
+          0
+        );
+      }
+    } catch (e) {
+      console.error("Citation Graph: Error grouping papers by tag", e);
       logNotice(`Error: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
@@ -2466,6 +2789,16 @@ export default class CitationGraphPlugin extends Plugin {
 
   // ─── Relayout Canvas ───────────────────────────────────────
 
+  /** Ask before a command that moves every paper and discards manual positions. */
+  private confirmPositionReset(title: string, action: string): Promise<boolean> {
+    return askChoice<boolean>(this.app, {
+      title,
+      question: "This will reset all paper positions. Custom positioning will be lost.",
+      choices: [{ text: action, value: true, cta: true }],
+      cancelled: false,
+    });
+  }
+
   private async relayoutCanvas(): Promise<void> {
     try {
       // Find the canvas file
@@ -2475,29 +2808,7 @@ export default class CitationGraphPlugin extends Plugin {
         return;
       }
 
-      // Confirmation dialog
-      const confirmed = await new Promise<boolean>((resolve) => {
-        const modal = new Modal(this.app);
-        modal.onOpen = () => {
-          const { contentEl } = modal;
-          modal.setTitle("Relayout canvas");
-          contentEl.createEl("p", {
-            text: "This will reset all node positions. Custom positioning will be lost.",
-          });
-          const footer = contentEl.createDiv({ cls: "citation-graph-footer" });
-          new ButtonComponent(footer)
-            .setButtonText("Relayout")
-            .setCta()
-            .onClick(() => { resolve(true); modal.close(); });
-          new ButtonComponent(footer)
-            .setButtonText("Cancel")
-            .onClick(() => modal.close());
-        };
-        modal.onClose = () => resolve(false);
-        modal.open();
-      });
-
-      if (!confirmed) return;
+      if (!(await this.confirmPositionReset("Relayout canvas", "Relayout"))) return;
 
       const canvasData = await this.readCanvas<CanvasMeta>(activeFile);
 
@@ -2546,12 +2857,15 @@ export default class CitationGraphPlugin extends Plugin {
       // Move the file nodes onto their new positions and leave every other
       // node where it is.
       await this.updateCanvas<CanvasMeta>(activeFile, (canvas) => {
-        canvas.nodes = canvas.nodes.map((node) => {
-          const updated = newLayoutById.get(node.id);
-          return updated
-            ? { ...node, x: updated.x, y: updated.y, width: updated.width, height: updated.height }
-            : node;
-        });
+        // Tag groups from "Group papers by tag" would no longer frame anything.
+        canvas.nodes = canvas.nodes
+          .filter((node) => !isTagGroup(node) && !isUpdateGroup(node))
+          .map((node) => {
+            const updated = newLayoutById.get(node.id);
+            return updated
+              ? { ...node, x: updated.x, y: updated.y, width: updated.width, height: updated.height }
+              : node;
+          });
         paintStatusColors(canvas.nodes, colors);
       });
       logNotice(`Relayouted ${papers.length} papers chronologically.`);
@@ -2984,7 +3298,7 @@ export default class CitationGraphPlugin extends Plugin {
           }
 
           logNotice(`Downloading ${missingPdf.length} PDF${missingPdf.length > 1 ? "s" : ""}...`);
-          const { resolvedArxiv } = await downloadPapers(
+          const outcome = await downloadPapers(
             missingPdf,
             downloadDir,
             adapter,
@@ -2996,7 +3310,7 @@ export default class CitationGraphPlugin extends Plugin {
               resolveArxiv: (paper) => this.findArxivId(paper),
             },
           );
-          await this.recordArxivIds(resolvedArxiv);
+          await this.recordDownload(outcome);
 
           // Re-resolve paths for the ones we tried to download
           for (const paper of missingPdf) {
@@ -3264,6 +3578,29 @@ function zoteroItemToPaper(item: ZoteroItem): Paper | null {
     citationCount: null,
     notePath: null,
   };
+}
+
+/**
+ * Fill a Zotero-derived paper in from a `getPaperBatch` response, which is
+ * indexed by lowercased DOI and by arXiv ID. Returns whether S2 knew it.
+ */
+function enrichFromBatch(paper: Paper, s2Papers: Map<string, S2Paper>): boolean {
+  const s2Paper = s2Papers.get(paper.doi ? paper.doi.toLowerCase() : paper.arxiv || "");
+  if (!s2Paper) return false;
+  paper.semanticScholarId = s2Paper.paperId;
+  if (!paper.arxiv && s2Paper.externalIds?.ArXiv) paper.arxiv = s2Paper.externalIds.ArXiv;
+  if (!paper.doi && s2Paper.externalIds?.DOI) paper.doi = s2Paper.externalIds.DOI;
+  if (!paper.year && s2Paper.year) paper.year = s2Paper.year;
+  if (s2Paper.citationCount != null) paper.citationCount = s2Paper.citationCount;
+  if (s2Paper.abstract) paper.abstract = s2Paper.abstract;
+  return true;
+}
+
+/** The identifier `getPaperBatch` accepts for a paper, or null without one. */
+function s2BatchId(paper: Paper): string | null {
+  if (paper.doi) return `DOI:${paper.doi}`;
+  if (paper.arxiv) return `ArXiv:${paper.arxiv}`;
+  return paper.semanticScholarId;
 }
 
 function paperToZoteroItem(p: {

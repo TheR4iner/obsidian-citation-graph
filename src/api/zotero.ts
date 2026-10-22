@@ -1,7 +1,7 @@
 /// <reference types="node" />
 import { requestUrl } from "obsidian";
 import type { ZoteroCollection, ZoteroItem } from "../types";
-import { asRecord, asString, parseJson, pick } from "./json";
+import { asArray, asNumber, asRecord, asString, parseJson, pick } from "./json";
 import * as http from "http";
 
 const LOCAL_BASE = "/api";
@@ -19,7 +19,20 @@ const MAX_LOCAL_RESPONSE_BYTES = 64 * 1024 * 1024;
  * which is a claim about Zotero's API that this function is in no position to
  * check; making that assertion visible at the call site is the point.
  */
-function localGet(path: string): Promise<unknown> {
+async function localGet(path: string): Promise<unknown> {
+  const data = await localGetText(path);
+  try {
+    return JSON.parse(data);
+  } catch {
+    throw new Error(`Invalid JSON from Zotero: ${data.slice(0, 200)}`);
+  }
+}
+
+/** Zotero's local server could not be reached at all: the app is not running. */
+export class ZoteroUnreachableError extends Error {}
+
+/** GET a local API path and return the raw body. */
+function localGetText(path: string): Promise<string> {
   return new Promise((resolve, reject) => {
     const req = http.get(
       { hostname: "127.0.0.1", port: LOCAL_PORT, path, headers: { Accept: "application/json" } },
@@ -52,21 +65,16 @@ function localGet(path: string): Promise<unknown> {
           reject(err instanceof Error ? err : new Error(String(err)))
         );
         res.on("end", () => {
-          if (truncated) return;
-          try {
-            resolve(JSON.parse(data));
-          } catch {
-            reject(new Error(`Invalid JSON from Zotero: ${data.slice(0, 200)}`));
-          }
+          if (!truncated) resolve(data);
         });
       }
     );
     req.on("error", () =>
-      reject(new Error("Cannot connect to Zotero. Make sure the Zotero desktop app is running."))
+      reject(new ZoteroUnreachableError("Cannot connect to Zotero. Make sure the Zotero desktop app is running."))
     );
     req.setTimeout(10000, () => {
       req.destroy();
-      reject(new Error("Zotero is not responding. Make sure the Zotero desktop app is running."));
+      reject(new ZoteroUnreachableError("Zotero is not responding. Make sure the Zotero desktop app is running."));
     });
   });
 }
@@ -187,6 +195,40 @@ export class ZoteroClient {
     });
   }
 
+  /**
+   * The local `file://` URL of the PDF Zotero stores for the item with this
+   * DOI, searching the personal library and then each group library. Null when
+   * no item matches, or its best attachment is not a PDF or is not on disk.
+   * Throws when Zotero cannot be reached, so a caller can tell "not running"
+   * from "no PDF".
+   */
+  async findPdfFileUrl(doi: string): Promise<string | null> {
+    for (const library of await this.libraryPaths()) {
+      const found = await localGet(
+        `${LOCAL_BASE}/${library}/items?q=${encodeURIComponent(doi)}&qmode=fields`
+      );
+      const attachment = pdfAttachmentPath(found, doi);
+      if (!attachment) continue;
+      // Zotero 7 answers this with the attachment's file URL as plain text.
+      return localPdfFileUrl(await localGetText(`${attachment}/file/view/url`));
+    }
+    return null;
+  }
+
+  private libraryList: Promise<string[]> | null = null;
+
+  /** "users/0" plus one "groups/<id>" per group, fetched once per client. */
+  private libraryPaths(): Promise<string[]> {
+    this.libraryList ??= localGet(`${LOCAL_BASE}/users/0/groups`)
+      .then((groups) => asArray(groups).map((g) => asNumber(pick(g, "id"))))
+      .catch(() => [] as Array<number | null>)
+      .then((ids) => [
+        "users/0",
+        ...ids.filter((id): id is number => id !== null).map((id) => `groups/${id}`),
+      ]);
+    return this.libraryList;
+  }
+
   // ─── Writes (Web API) ──────────────────────────────────────
 
   private requireWebApi(): void {
@@ -286,4 +328,64 @@ export class ZoteroClient {
     if (match) return match[1].trim();
     return null;
   }
+}
+
+/**
+ * From a local API item search, the API path of the best attachment of the
+ * item whose DOI is `doi`, when that attachment is a PDF that exists on disk.
+ *
+ * The search matches the DOI anywhere in any field, so results are filtered to
+ * an exact, case-insensitive DOI match. Zotero puts each item's best
+ * attachment (oldest PDF first) in `links.attachment`, and leaves out
+ * `attachmentSize` when the file is missing locally, for instance when file
+ * sync has not downloaded it.
+ */
+export function pdfAttachmentPath(searchResults: unknown, doi: string): string | null {
+  const wanted = doi.trim().toLowerCase();
+  for (const item of asArray(searchResults)) {
+    const itemType = asString(pick(item, "data", "itemType"));
+    if (!itemType || itemType === "attachment" || itemType === "note" || itemType === "annotation") continue;
+    if (ZoteroClient.extractDOI(item as ZoteroItem)?.trim().toLowerCase() !== wanted) continue;
+    const link = pick(item, "links", "attachment");
+    if (asString(pick(link, "attachmentType")) !== "application/pdf") continue;
+    if (asNumber(pick(link, "attachmentSize")) === null) continue;
+    const href = asString(pick(link, "href"));
+    if (!href) continue;
+    let pathname: string;
+    try {
+      pathname = new URL(href).pathname;
+    } catch {
+      continue;
+    }
+    // Only ever follow a path of the expected shape back to the local server.
+    if (/^\/api\/(?:users|groups)\/\d+\/items\/[A-Z0-9]+$/.test(pathname)) return pathname;
+  }
+  return null;
+}
+
+/**
+ * Accept Zotero's answer as a link only when it is a host-less `file://` URL
+ * of a `.pdf`. A linked attachment in a group library points wherever another
+ * member chose, and the link is handed to the system to open: a non-PDF file
+ * would open in whatever handles its type, and a URL naming a host (a network
+ * share on Windows) would make the system connect to it.
+ */
+export function localPdfFileUrl(text: string): string | null {
+  let url: URL;
+  try {
+    url = new URL(text.trim());
+  } catch {
+    return null;
+  }
+  if (url.protocol !== "file:" || url.host !== "") return null;
+  // An empty host does not rule out a share: "file:////server/share" keeps it
+  // in the path, which Windows reads as a UNC path, as it does a backslash.
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(url.pathname);
+  } catch {
+    return null;
+  }
+  if (decoded.startsWith("//") || decoded.includes("\\")) return null;
+  return /\.pdf$/i.test(url.pathname) ? url.href : null;
 }

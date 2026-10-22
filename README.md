@@ -7,9 +7,11 @@ Turn your literature into a citation graph on an Obsidian canvas: papers as node
 ## Features
 
 - **Build a canvas** from a Zotero collection or tag, or add papers one at a time by DOI or arXiv ID. Each paper gets a literature note.
+- **Keep it in step with Zotero**: references you add to the collection later can be pulled onto a canvas you have already rearranged, without moving anything on it.
 - **Grow it** with any paper's references and citing works, filtered by year and keyword, and sorted by citations, year, title or the order the paper cites them.
+- **Group by topic**: tag paper notes with ordinary Obsidian tags (up to three each), and one command rearranges the canvas into a labelled group per tag. Groups overlap, so a paper with two tags sits where both groups meet.
 - **Track your reading**: every paper shows its status (to read, reading, read, abandoned) as a coloured border.
-- **Download PDFs** from arXiv into a vault folder.
+- **Download PDFs** from arXiv into a vault folder, linked from each paper's note and its canvas card, or open the PDF Zotero already stores: each paper added to a canvas is looked up in Zotero by DOI and its PDF linked from the note.
 - **Summarize papers** with an LLM, written straight into the note.
 - **Get recommendations**: an LLM suggests papers that belong on the canvas, and each one is checked against a citation database before you see it.
 
@@ -32,6 +34,7 @@ Every per-paper command is also on the right-click menu of a canvas node. No Zot
 | Faster citation lookups | A free [Semantic Scholar API key](https://www.semanticscholar.org/product/api#api-key-form). Without one, a large collection takes minutes |
 | Summaries and recommendations | A provider under Settings, Summaries (see below) |
 | PDF downloads | A vault folder under *Default download folder*, or pick one when downloading |
+| Opening Zotero PDFs from notes | Zotero running when papers are added, or run *PDFs: link from Zotero* later. Turn off with *Link Zotero PDFs* |
 | Syncing back to Zotero | A Zotero API key and user ID from [zotero.org/settings/keys](https://www.zotero.org/settings/keys) |
 
 **LLM providers.**
@@ -48,6 +51,8 @@ Every per-paper command is also on the right-click menu of a canvas node. No Zot
 | Canvas: create from collection / from tag | Builds a canvas from Zotero |
 | Canvas: resolve missing citation edges | Draws arrows still missing between papers on the canvas |
 | Canvas: relayout | Re-sorts nodes by year |
+| Canvas: update from collection | Adds papers new to the canvas's Zotero collection, without moving anything |
+| Canvas: group papers by tag | Arranges papers into overlapping labelled groups, one per tag |
 | Canvas: sync to Zotero | Pushes the canvas's papers to a Zotero collection |
 | Canvas: send papers to another canvas | Copies or moves papers with their arrows |
 | Papers: expand paper | Adds a paper's references and citing works |
@@ -55,7 +60,8 @@ Every per-paper command is also on the right-click menu of a canvas node. No Zot
 | Papers: recommend papers | Asks the LLM for papers that fit the canvas |
 | Papers: delete paper | Deletes the node, its arrows and its note |
 | Reading: set / cycle / refresh reading status | Sets or repaints reading status |
-| PDFs: download | Fetches PDFs from arXiv |
+| PDFs: download | Fetches PDFs from arXiv and links them from the paper notes |
+| PDFs: link from Zotero | Links each paper's Zotero-stored PDF from its note |
 | PDFs: write summary | Writes an LLM summary into the note |
 | Maintenance: clear Semantic Scholar cache | Drops cached citation data |
 

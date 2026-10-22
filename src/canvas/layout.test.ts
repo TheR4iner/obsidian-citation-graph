@@ -4,9 +4,12 @@ import {
 	legacyPaperNodeId,
 	paperNodeId,
 	paperNodeIdCandidates,
+	placeInNewGroup,
+	isUpdateGroup,
+	UPDATE_GROUP_PREFIX,
 	resolvePaperNodeId,
 } from "./layout";
-import type { Paper } from "../types";
+import type { CanvasNode, Paper } from "../types";
 
 const paper = (overrides: Partial<Paper> = {}): Paper => ({
 	id: "s2:abc",
@@ -135,5 +138,66 @@ describe("resolvePaperNodeId", () => {
 
 	it("falls back to the current ID for a paper not on the canvas yet", () => {
 		expect(resolvePaperNodeId(p, new Set())).toBe(paperNodeId(p));
+	});
+});
+
+describe("placeInNewGroup", () => {
+	const size = { nodeWidth: 400, nodeHeight: 300 };
+	const group = { id: "g1", label: "New from Zotero" };
+	const existing: CanvasNode[] = [
+		{ id: "a", type: "file", file: "a.md", x: -500, y: -200, width: 400, height: 300 },
+		{ id: "b", type: "text", text: "my note", x: 1000, y: 50, width: 250, height: 100 },
+	];
+	const newOnes = [
+		paper({ doi: "10.1/c", year: 2020, notePath: "c.md" }),
+		paper({ doi: "10.1/d", year: 2010, notePath: "d.md" }),
+		paper({ doi: "10.1/e", year: 2015, notePath: "e.md" }),
+	];
+
+	it("returns nothing when there is nothing to place", () => {
+		expect(placeInNewGroup(existing, [], group, size)).toEqual([]);
+	});
+
+	it("puts the group beside the bounding box, before its cards", () => {
+		const [g, ...cards] = placeInNewGroup(existing, newOnes, group, size);
+		expect(g).toMatchObject({ id: "g1", type: "group", label: "New from Zotero", x: 1650, y: -200 });
+		expect(cards).toHaveLength(3);
+		for (const c of cards) {
+			expect(c.type).toBe("file");
+			expect(c.x).toBeGreaterThanOrEqual(g.x);
+			expect(c.y).toBeGreaterThanOrEqual(g.y);
+			expect(c.x + c.width).toBeLessThanOrEqual(g.x + g.width);
+			expect(c.y + c.height).toBeLessThanOrEqual(g.y + g.height);
+		}
+	});
+
+	it("overlaps no existing node", () => {
+		const placed = placeInNewGroup(existing, newOnes, group, size);
+		const overlaps = (p: CanvasNode, q: CanvasNode) =>
+			p.x < q.x + q.width && q.x < p.x + p.width && p.y < q.y + q.height && q.y < p.y + p.height;
+		for (const p of placed) for (const q of existing) expect(overlaps(p, q)).toBe(false);
+	});
+
+	it("orders cards by year and gives each its paper's node ID", () => {
+		const cards = placeInNewGroup(existing, newOnes, group, size).slice(1);
+		expect(cards.map((c) => c.file)).toEqual(["d.md", "e.md", "c.md"]);
+		expect(cards[0].id).toBe(paperNodeId(newOnes[1]));
+	});
+
+	it("starts at the origin on an empty canvas", () => {
+		const [g] = placeInNewGroup([], newOnes.slice(0, 1), group, size);
+		expect(g).toMatchObject({ x: 0, y: 0, width: 600, height: 500 });
+	});
+});
+
+describe("isUpdateGroup", () => {
+	const node = (id: string, type: CanvasNode["type"]): CanvasNode =>
+		({ id, type, x: 0, y: 0, width: 1, height: 1 });
+
+	it("recognises only groups carrying the update prefix", () => {
+		expect(isUpdateGroup(node(`${UPDATE_GROUP_PREFIX}x1`, "group"))).toBe(true);
+		expect(isUpdateGroup(node("cg-tag-0", "group"))).toBe(false);
+		expect(isUpdateGroup(node("mine", "group"))).toBe(false);
+		expect(isUpdateGroup(node(`${UPDATE_GROUP_PREFIX}x1`, "text"))).toBe(false);
 	});
 });
