@@ -411,12 +411,9 @@ ${paper.arxiv ? `**arXiv**: [${escapeNoteText(paper.arxiv)}](https://arxiv.org/a
     return PAPER_ID_FIELDS.some((key) => key in fm);
   }
 
-  /**
-   * The tag a paper is grouped under: the first one in its `tags` frontmatter,
-   * or null when it has none.
-   */
-  getPrimaryTag(file: TFile): string | null {
-    return readFrontmatterTags(frontmatterOf(this.app, file)?.tags)[0] ?? null;
+  /** The tags in a note's `tags` frontmatter, without the `#`. */
+  getTags(file: TFile): string[] {
+    return readFrontmatterTags(frontmatterOf(this.app, file)?.tags);
   }
 
   /**
