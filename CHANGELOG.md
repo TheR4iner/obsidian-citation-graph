@@ -6,6 +6,8 @@ Each released version here is also the body of the matching [GitHub release](htt
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-10-22
+
 ### Added
 
 - *Canvas: update from collection* adds the references you have put in a canvas's Zotero collection since the canvas was created, so a canvas you have rearranged or annotated no longer has to be rebuilt to catch up. Papers already on the canvas are skipped, nothing on it moves, and the new cards arrive in a *New from Zotero* group beside it, with literature notes and citation arrows to the papers already there. *Relayout* and *Group papers by tag* remove that group again when they rearrange the papers. The closing notice says how many papers were added and how many could not be found on Semantic Scholar.
@@ -187,7 +189,8 @@ First public release.
 - **Sync canvas to Zotero**, **Send papers to canvas**, **Relayout canvas**, **Delete paper**, and **Clear Semantic Scholar cache**.
 - Settings for the collections folder, the Zotero and Semantic Scholar API keys, node size, the five status colours, and the full LLM configuration.
 
-[Unreleased]: https://github.com/TheR4iner/obsidian-citation-graph/compare/0.8.0...HEAD
+[Unreleased]: https://github.com/TheR4iner/obsidian-citation-graph/compare/0.9.0...HEAD
+[0.9.0]: https://github.com/TheR4iner/obsidian-citation-graph/compare/0.8.0...0.9.0
 [0.8.0]: https://github.com/TheR4iner/obsidian-citation-graph/compare/0.7.2...0.8.0
 [0.7.2]: https://github.com/TheR4iner/obsidian-citation-graph/compare/0.7.1...0.7.2
 [0.7.1]: https://github.com/TheR4iner/obsidian-citation-graph/compare/0.7.0...0.7.1
