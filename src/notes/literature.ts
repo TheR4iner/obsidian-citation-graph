@@ -310,6 +310,7 @@ ${paper.arxiv ? `**arXiv**: [${escapeNoteText(paper.arxiv)}](https://arxiv.org/a
       fm.citekey = paper.citekey || null;
       fm.semantic_scholar_id = paper.semanticScholarId || null;
       fm.status = "unread" satisfies PaperStatus;
+      fm.tags = [];
       fm.cssclasses = withNoteClass(fm.cssclasses, "unread");
     });
     paper.notePath = path;
@@ -394,6 +395,14 @@ ${paper.arxiv ? `**arXiv**: [${escapeNoteText(paper.arxiv)}](https://arxiv.org/a
     const fm = frontmatterOf(this.app, file);
     if (!fm) return false;
     return PAPER_ID_FIELDS.some((key) => key in fm);
+  }
+
+  /**
+   * The tag a paper is grouped under: the first one in its `tags` frontmatter,
+   * or null when it has none.
+   */
+  getPrimaryTag(file: TFile): string | null {
+    return readFrontmatterTags(frontmatterOf(this.app, file)?.tags)[0] ?? null;
   }
 
   /**
@@ -550,6 +559,19 @@ export function withNoteClass(
   );
   const statusClass = status ? [`${STATUS_CLASS_PREFIX}${status}`] : [];
   return [NOTE_CLASS, ...statusClass, ...others];
+}
+
+/**
+ * Read a `tags` frontmatter value as a list of tag names without the `#`.
+ * Obsidian accepts a list or a single string separated by commas or spaces.
+ */
+export function readFrontmatterTags(value: unknown): string[] {
+  const raw = Array.isArray(value)
+    ? value.filter((t) => typeof t === "string" || typeof t === "number").map(String)
+    : typeof value === "string"
+      ? value.split(/[,\s]+/)
+      : [];
+  return raw.map((t) => t.trim().replace(/^#/, "")).filter((t) => t !== "");
 }
 
 /**
