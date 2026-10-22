@@ -378,5 +378,14 @@ export function localPdfFileUrl(text: string): string | null {
     return null;
   }
   if (url.protocol !== "file:" || url.host !== "") return null;
+  // An empty host does not rule out a share: "file:////server/share" keeps it
+  // in the path, which Windows reads as a UNC path, as it does a backslash.
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(url.pathname);
+  } catch {
+    return null;
+  }
+  if (decoded.startsWith("//") || decoded.includes("\\")) return null;
   return /\.pdf$/i.test(url.pathname) ? url.href : null;
 }
