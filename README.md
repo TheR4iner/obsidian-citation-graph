@@ -9,7 +9,7 @@ Turn your literature into a citation graph on an Obsidian canvas: papers as node
 - **Build a canvas** from a Zotero collection or tag, or add papers one at a time by DOI or arXiv ID. Each paper gets a literature note.
 - **Grow it** with any paper's references and citing works, filtered by year and keyword, and sorted by citations, year, title or the order the paper cites them.
 - **Track your reading**: every paper shows its status (to read, reading, read, abandoned) as a coloured border.
-- **Download PDFs** from arXiv into a vault folder.
+- **Download PDFs** from arXiv into a vault folder, linked from each paper's note.
 - **Summarize papers** with an LLM, written straight into the note.
 - **Get recommendations**: an LLM suggests papers that belong on the canvas, and each one is checked against a citation database before you see it.
 
@@ -55,7 +55,7 @@ Every per-paper command is also on the right-click menu of a canvas node. No Zot
 | Papers: recommend papers | Asks the LLM for papers that fit the canvas |
 | Papers: delete paper | Deletes the node, its arrows and its note |
 | Reading: set / cycle / refresh reading status | Sets or repaints reading status |
-| PDFs: download | Fetches PDFs from arXiv |
+| PDFs: download | Fetches PDFs from arXiv and links them from the paper notes |
 | PDFs: write summary | Writes an LLM summary into the note |
 | Maintenance: clear Semantic Scholar cache | Drops cached citation data |
 

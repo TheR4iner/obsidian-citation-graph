@@ -30,11 +30,25 @@ Papers already present in the download directory are labelled `downloaded` and l
 
 Already-downloaded detection matches the formatted filename (`Title (FirstAuthor) (Year).pdf`) that this plugin renames every download to, and falls back to matching a DOI with `/` and `.` replaced by `_`, which is how several external tools name their files.
 
+## Linking the PDF from the note
+
+`DownloadOutcome.savedPdfs` maps each saved paper's note path to the PDF's vault path. `recordDownload` in `main.ts` (shared by *Download* and *Write summary*'s download offer) writes each one through `linkPdf()` in `src/notes/literature.ts`, which sets the `pdf` frontmatter property to `"[[vault/path.pdf]]"` via `processFrontMatter`.
+
+- **Fill only when empty.** An existing `pdf` value (the user's, a Zotero link from #57, or an earlier run's) is kept. That is what makes re-downloading idempotent, and since the target path is deterministic a re-download after deleting the file makes the old link resolve again.
+- **Wikilink, full vault path.** Obsidian tracks wikilinks in frontmatter and rewrites them on rename/move; a markdown link in a property is plain text. The full path avoids basename ambiguity.
+- **`#`, `^`, `[`, `]` are stripped from download filenames** by `sanitizeFilename`, because no wikilink can escape them. Cost: a PDF downloaded before this under such a name is no longer detected as downloaded (formatted-name match fails) and would be fetched again.
+- **No note, no link.** A paper without `notePath` keeps its file; nothing else to do.
+- **Not done:** papers already in the folder (rows marked `downloaded`) are not linked retroactively, since the picker never downloads them. Add a backfill when someone asks.
+
+`linkPdf()` is the shared writer for the `pdf` property; the Zotero-PDF feature (#57) is meant to reuse it.
+
 ## Skipping the picker
 
 With exactly one paper targeted and a download folder already known (the canvas's `lastDownloadPath`, else the `defaultDownloadPath` setting), the command downloads without opening the picker. A modal offering back the single paper the user just selected, with a checkbox beside it, asks a question that has already been answered. The picker still opens for several papers, and whenever no folder is known, because that is the only place to enter one.
 
 ## History
+
+**2026-10-22 -- link the downloaded PDF from the note (#56).** Added `savedPdfs` to the outcome, `linkPdf()`, and `recordDownload` (which replaced `recordArxivIds` and handles both write-backs with one error path). See *Linking the PDF from the note*.
 
 **2026-09-01 — always check arXiv, and stop asking about one paper.** Two complaints, both about the picker overstepping. A paper added by a publisher DOI was greyed out as having no source although arXiv had it, and downloading one selected paper opened a window containing one checkbox. Row gating was relaxed as described above, `downloadPapers` gained a `resolveArxiv` callback (see [[arXiv lookup by DOI and title]]), and the single-paper case now skips the modal. `downloadPapers`'s trailing `onProgress` argument became an options object in the same pass, and it returns the arXiv IDs it discovered so the caller can write them into frontmatter.
 

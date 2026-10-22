@@ -6,6 +6,14 @@ Each released version here is also the body of the matching [GitHub release](htt
 
 ## [Unreleased]
 
+### Added
+
+- Downloading a PDF now links it from the paper's note, in a `pdf` property, so the file opens straight from the note. A link already there is kept, so downloading again adds nothing.
+
+### Changed
+
+- Downloaded PDFs no longer keep `#`, `^`, `[` or `]` from the paper's title in their filename, since a link to the file could not contain them. A PDF downloaded earlier under such a name is no longer recognised as downloaded.
+
 ## [0.8.0] - 2026-10-07
 
 ### Added

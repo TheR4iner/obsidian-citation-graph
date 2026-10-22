@@ -149,6 +149,18 @@ function editFrontmatter(
   return app.fileManager.processFrontMatter(file, edit);
 }
 
+/**
+ * Link `pdfPath` (a vault path) from the note's `pdf` property, as a wikilink
+ * so Obsidian keeps it current when the file is renamed or moved. A `pdf`
+ * value already there is the user's or an earlier run's and is left alone,
+ * which also makes repeating the call harmless.
+ */
+export function linkPdf(app: App, file: TFile, pdfPath: string): Promise<void> {
+  return editFrontmatter(app, file, (fm) => {
+    if (fm.pdf == null || fm.pdf === "" || fm.pdf === "null") fm.pdf = `[[${pdfPath}]]`;
+  });
+}
+
 /** A note's frontmatter as an object of unknown values, or null. */
 function frontmatterOf(app: App, file: TFile): Record<string, unknown> | null {
   const fm: unknown = app.metadataCache.getFileCache(file)?.frontmatter;
