@@ -12,7 +12,7 @@ Zotero 7 local API, verified against Zotero's own source on the `7.0` branch (`c
 
 1. `GET /api/{users/0|groups/<id>}/items?q=<doi>&qmode=fields`. `qmode` maps straight to the search condition `quicksearch-<qmode>`; `fields` is all fields (DOI and Extra included) without full text, so a PDF that merely cites the DOI does not match. Results are still filtered to an exact case-insensitive DOI (`ZoteroClient.extractDOI`, so a DOI in Extra counts).
 2. Each regular item's response JSON carries `links.attachment` = its best attachment (`getBestAttachment`: oldest PDF first) with `href` (an API URL on localhost), `attachmentType`, and `attachmentSize`, which is **omitted when the file is missing on disk**. `pdfAttachmentPath` requires `application/pdf` and a size, and only follows an href whose path matches `/api/(users|groups)/<n>/items/<KEY>`.
-3. `GET <that path>/file/view/url` answers `text/plain` with `item.getLocalFileURL()`, a `file://` URL. This covers imported and linked files alike, which `links.enclosure` (imported only) would not. Hence `localGetText` beside `localGet`. `localPdfFileUrl` then accepts only a host-less `file:` URL ending in `.pdf`: a group library's linked file points wherever another member chose, and the link is handed to the OS to open, so a non-PDF or a `file://server/share` (SMB on Windows) is refused.
+3. `GET <that path>/file/view/url` answers `text/plain` with `item.getLocalFileURL()`, a `file://` URL. This covers imported and linked files alike, which `links.enclosure` (imported only) would not. Hence `localGetText` beside `localGet`. `localPdfFileUrl` then accepts only a host-less `file:` URL ending in `.pdf`: a group library's linked file points wherever another member chose, and the link is handed to the OS to open, so a non-PDF or a `file://server/share` (SMB on Windows) is refused. An empty host is not enough on its own: `file:////server/share` keeps the share in the path, so a path starting `//` or holding any backslash (decoded) is refused too.
 
 `pdfLinkValue` in `src/paper-files.ts` turns the URL into `[[vault/relative.pdf]]` when the file is inside the vault (`isInside`, not a prefix test), else keeps the `file://` URL. `setPdfLink` in `src/notes/literature.ts` writes only an empty property and reports whether it wrote; #56's `linkPdf` (downloads) now delegates to it, so the empty-value rule lives once. Whichever of the two finds a PDF first wins.
 
@@ -26,6 +26,8 @@ Hooked after the canvas write in `buildCanvasFromItems`, `expandPaper`, `addPape
 - Group libraries are searched one after another per paper. With many groups that is many requests; fine at local-server latency.
 
 ## History
+
+**2026-10-22** -- Closed the `file:////server/share` gap the host check missed (PR after #62).
 
 **2026-10-22** -- Merged develop after #56 landed; `linkPdf` now calls `setPdfLink`.
 

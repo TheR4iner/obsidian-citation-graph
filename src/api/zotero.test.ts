@@ -70,6 +70,10 @@ describe("localPdfFileUrl", () => {
 
   it("refuses a network share, a non-PDF, another scheme, and junk", () => {
     expect(localPdfFileUrl("file://server/share/a.pdf")).toBeNull();
+    expect(localPdfFileUrl("file:////server/share/a.pdf")).toBeNull();
+    expect(localPdfFileUrl("file://///server/share/a.pdf")).toBeNull();
+    expect(localPdfFileUrl("file:///%5C%5Cserver/share/a.pdf")).toBeNull();
+    expect(localPdfFileUrl("file:///C:%5Cx%5Ca.pdf")).toBeNull();
     expect(localPdfFileUrl("file:///home/u/run.sh")).toBeNull();
     expect(localPdfFileUrl("https://example.org/a.pdf")).toBeNull();
     expect(localPdfFileUrl("false")).toBeNull();
