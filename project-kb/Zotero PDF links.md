@@ -20,12 +20,16 @@ Error handling: an unreachable server raises `ZoteroUnreachableError` (connect e
 
 Hooked after the canvas write in `buildCanvasFromItems`, `expandPaper`, `addPaperByDoi` and `addRecommendedPapers`. *Send papers to canvas* does not run it: those notes already exist.
 
+- **Body line.** Canvas cards do not render properties, so `setPdfLink` (the single writer for both downloaded and Zotero PDFs) also inserts `**PDF**: [[path|Open PDF]]` (or `[Open PDF](<file://...>)` for a file outside the vault) below the last `**Authors|Year|DOI|arXiv**:` line before the first `##` heading, via `insertPdfLine`. It follows the value the property actually holds, so a note whose property predates the line is backfilled on its next link. Skipped when a `**PDF**:` line exists or no metadata line is left to anchor to. `SCAFFOLD_FIELD_LINE` includes `PDF`, otherwise the line would flip the paper to *Read + notes written*.
+
 ## Open questions
 
 - Papers with only an arXiv ID are not looked up. Zotero items for preprints often carry the arXiv-minted DOI, which is matched; a search by arXiv ID could be added if asked.
 - Group libraries are searched one after another per paper. With many groups that is many requests; fine at local-server latency.
 
 ## History
+
+**2026-10-22, Open PDF line in the body.** Requested after testing in the dev vault: the property was written but invisible on the canvas card.
 
 **2026-10-22** -- Closed the `file:////server/share` gap the host check missed (PR after #62).
 

@@ -11,7 +11,7 @@ Turn your literature into a citation graph on an Obsidian canvas: papers as node
 - **Grow it** with any paper's references and citing works, filtered by year and keyword, and sorted by citations, year, title or the order the paper cites them.
 - **Group by topic**: tag paper notes with ordinary Obsidian tags (up to three each), and one command rearranges the canvas into a labelled group per tag. Groups overlap, so a paper with two tags sits where both groups meet.
 - **Track your reading**: every paper shows its status (to read, reading, read, abandoned) as a coloured border.
-- **Download PDFs** from arXiv into a vault folder, linked from each paper's note, or open the PDF Zotero already stores: each paper added to a canvas is looked up in Zotero by DOI and its PDF linked from the note.
+- **Download PDFs** from arXiv into a vault folder, linked from each paper's note and its canvas card, or open the PDF Zotero already stores: each paper added to a canvas is looked up in Zotero by DOI and its PDF linked from the note.
 - **Summarize papers** with an LLM, written straight into the note.
 - **Get recommendations**: an LLM suggests papers that belong on the canvas, and each one is checked against a citation database before you see it.
 

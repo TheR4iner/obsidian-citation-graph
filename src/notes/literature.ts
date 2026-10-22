@@ -80,7 +80,7 @@ export function escapeNoteText(value: string): string {
  * `## Summary`. Deliberately not anchored on the `## Notes` heading, because
  * users routinely delete it and write their own headings in its place.
  */
-const SCAFFOLD_FIELD_LINE = /^\*\*(?:Authors|Year|DOI|arXiv)\*\*:/;
+const SCAFFOLD_FIELD_LINE = /^\*\*(?:Authors|Year|DOI|arXiv|PDF)\*\*:/;
 const SCAFFOLD_NOTES_HEADING = /^##\s+Notes\s*$/;
 const FRONTMATTER_BLOCK = /^---\r?\n[\s\S]*?\r?\n---\r?\n?/;
 
@@ -166,13 +166,45 @@ export async function linkPdf(app: App, file: TFile, pdfPath: string): Promise<v
  */
 export async function setPdfLink(app: App, file: TFile, value: string): Promise<boolean> {
   let wrote = false;
+  let linked: unknown = null;
   await editFrontmatter(app, file, (fm) => {
     if (fm.pdf == null || fm.pdf === "" || fm.pdf === "null") {
       fm.pdf = value;
       wrote = true;
     }
+    linked = fm.pdf;
   });
+  // The body line follows whatever the property holds, so a note whose
+  // property predates the line gets it the next time a PDF is linked.
+  if (typeof linked === "string") {
+    const target = linked;
+    await app.vault.process(file, (content) => insertPdfLine(content, target) ?? content);
+  }
   return wrote;
+}
+
+/** The note-body line linking a `pdf` property value under a short label. */
+export function pdfBodyLine(value: string): string {
+  const wiki = /^\[\[([^\]|]+)(?:\|[^\]]*)?\]\]$/.exec(value);
+  return wiki ? `**PDF**: [[${wiki[1]}|Open PDF]]` : `**PDF**: [Open PDF](<${value}>)`;
+}
+
+/**
+ * Add the PDF line under the note's metadata lines (authors, year, DOI,
+ * arXiv), or return null when the note already has one or has no metadata
+ * line to anchor it to: a note the user restructured is left alone.
+ */
+export function insertPdfLine(content: string, value: string): string | null {
+  const lines = content.split("\n");
+  if (lines.some((l) => /^\*\*PDF\*\*:/.test(l))) return null;
+  let anchor = -1;
+  for (let i = 0; i < lines.length; i++) {
+    if (/^## /.test(lines[i])) break;
+    if (/^\*\*(Authors|Year|DOI|arXiv)\*\*:/.test(lines[i])) anchor = i;
+  }
+  if (anchor === -1) return null;
+  lines.splice(anchor + 1, 0, pdfBodyLine(value));
+  return lines.join("\n");
 }
 
 /** A note's frontmatter as an object of unknown values, or null. */
