@@ -7,6 +7,8 @@ import {
 	linkPdf,
 	readFrontmatterArxiv,
 	setPdfLink,
+	insertPdfLine,
+	pdfBodyLine,
 	readFrontmatterTags,
 	withNoteClass,
 } from "./literature";
@@ -581,5 +583,61 @@ describe("linkPdf", () => {
 		await linkPdf(vault.app, vault.file(note), "x.pdf");
 		await linkPdf(vault.app, vault.file(note), "x.pdf");
 		expect(vault.notes.get(note)!.fm!.pdf).toBe("[[mine.pdf]]");
+	});
+});
+
+describe("PDF line in the note body", () => {
+	const body = (opts: { arxiv?: boolean; notes?: string } = {}) =>
+		scaffold(opts).replace(/^---[\s\S]*?---\n/, "");
+
+	it("labels a vault PDF as a short wikilink", () => {
+		expect(pdfBodyLine("[[PDFs/A (B) (2020).pdf]]")).toBe("**PDF**: [[PDFs/A (B) (2020).pdf|Open PDF]]");
+		expect(pdfBodyLine("[[a.pdf|old label]]")).toBe("**PDF**: [[a.pdf|Open PDF]]");
+	});
+
+	it("labels a file URL as a markdown link that survives spaces", () => {
+		expect(pdfBodyLine("file:///z/My%20Paper.pdf")).toBe("**PDF**: [Open PDF](<file:///z/My%20Paper.pdf>)");
+	});
+
+	it("goes right below the arXiv line", () => {
+		const lines = insertPdfLine(body(), "[[a.pdf]]")!.split("\n");
+		const arxiv = lines.findIndex((l) => l.startsWith("**arXiv**"));
+		expect(lines[arxiv + 1]).toBe("**PDF**: [[a.pdf|Open PDF]]");
+	});
+
+	it("goes below the last metadata line when there is no arXiv ID", () => {
+		const lines = insertPdfLine(body({ arxiv: false }), "[[a.pdf]]")!.split("\n");
+		const doi = lines.findIndex((l) => l.startsWith("**DOI**"));
+		expect(lines[doi + 1]).toBe("**PDF**: [[a.pdf|Open PDF]]");
+	});
+
+	it("ignores metadata-looking lines the user wrote under their notes", () => {
+		const out = insertPdfLine(body({ notes: "**Year**: mine" }), "[[a.pdf]]")!;
+		expect(out.indexOf("**PDF**")).toBeLessThan(out.indexOf("## Notes"));
+	});
+
+	it("adds nothing when the note already has a PDF line or no metadata", () => {
+		expect(insertPdfLine(insertPdfLine(body(), "[[a.pdf]]")!, "[[b.pdf]]")).toBeNull();
+		expect(insertPdfLine("# Title\n\nmy own text", "[[a.pdf]]")).toBeNull();
+	});
+
+	it("setPdfLink writes the line, and adds it to a note whose property came first", async () => {
+		const fresh = makeNote({ fm: { pdf: null }, body: body() });
+		await setPdfLink(fresh.app, fresh.file, "[[x.pdf]]");
+		expect(fresh.body()).toContain("**PDF**: [[x.pdf|Open PDF]]");
+
+		const older = makeNote({ fm: { pdf: "[[mine.pdf]]" }, body: body() });
+		await setPdfLink(older.app, older.file, "[[x.pdf]]");
+		expect(older.body()).toContain("**PDF**: [[mine.pdf|Open PDF]]");
+		await setPdfLink(older.app, older.file, "[[x.pdf]]");
+		expect(older.body().match(/\*\*PDF\*\*/g)).toHaveLength(1);
+	});
+});
+
+describe("bodyHasUserContent and the PDF line", () => {
+	it("does not count the generated PDF line as notes", () => {
+		const withPdf = insertPdfLine(scaffold(), "[[a.pdf]]")!;
+		expect(withPdf).toContain("**PDF**");
+		expect(bodyHasUserContent(withPdf)).toBe(false);
 	});
 });

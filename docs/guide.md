@@ -191,7 +191,7 @@ The list lives in the canvas file, so it travels with the canvas. Review it, or 
 
 **Download** saves as `Title (FirstAuthor) (Year).pdf` in a folder of your vault, created if it does not exist. With exactly one paper selected and a download folder already known (the canvas's last one, or the *Default download folder* setting), it downloads straight away; otherwise it opens a picker where you choose the papers and the folder, with your vault's folders suggested as you type. Papers already in the folder are marked `downloaded` and left unchecked.
 
-**Each downloaded PDF is linked from its paper note**, as a `pdf` frontmatter property holding a wikilink such as `pdf: "[[Papers/PDFs/Title (Author) (Year).pdf]]"`, so the file opens from the note and Obsidian keeps the link current if you move or rename it. A `pdf` value already in the note is left as it is, so downloading again never adds a second link and never replaces one you set yourself. The same happens when *Write summary* downloads a missing PDF. Characters a wikilink cannot carry (`#`, `^`, `[`, `]`) are left out of the filename.
+**Each downloaded PDF is linked from its paper note**, as a `pdf` frontmatter property holding a wikilink such as `pdf: "[[Papers/PDFs/Title (Author) (Year).pdf]]"`, so the file opens from the note and Obsidian keeps the link current if you move or rename it. A `pdf` value already in the note is left as it is, so downloading again never adds a second link and never replaces one you set yourself. The note body also gets an *Open PDF* link to the same file, which shows on the paper's canvas card. See [Literature notes](#literature-notes). The same happens when *Write summary* downloads a missing PDF. Characters a wikilink cannot carry (`#`, `^`, `[`, `]`) are left out of the filename.
 
 Versions before 0.7.0 saved PDFs anywhere on disk. A stored folder that points inside the vault, even written as an absolute or `~` path, keeps working. One that points outside it is refused with a message: pick a vault folder and move the PDFs you already have into it.
 
@@ -350,9 +350,9 @@ cssclasses:
 ---
 ```
 
-The body carries a title heading, an author/year/DOI/arXiv block, a `## Summary` section written by *Write summary*, and a `## Notes` section for you.
+The body carries a title heading, an author/year/DOI/arXiv block (plus an *Open PDF* link once the PDF is known), a `## Summary` section written by *Write summary*, and a `## Notes` section for you.
 
-`pdf` is added once the paper's PDF is known: when it is downloaded (see [Download](#download)) or found in Zotero (see [Zotero PDF links](#zotero-pdf-links)). The plugin only ever fills it when empty.
+`pdf` is added once the paper's PDF is known: when it is downloaded (see [Download](#download)) or found in Zotero (see [Zotero PDF links](#zotero-pdf-links)). The plugin only ever fills it when empty. Whenever it links a PDF, it also adds a `**PDF**: Open PDF` line to the body, below the arXiv line, linking the same file, so the PDF opens from the note and from its card on the canvas, which does not show properties. A note that already has a PDF line, or whose author/year/DOI/arXiv block you removed, is left alone, and the line never makes a paper count as *Read + notes written*.
 
 `status` holds one of `unread`, `reading`, `read` or `abandoned`, which the interface labels *To read*, *Reading*, *Read* and *Abandoned*. *Read + notes written* has no stored value: it is derived, from `read` plus content in the note's body.
 
