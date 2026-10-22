@@ -48,6 +48,7 @@ import { CollectionPickerModal } from "./modals/collection-picker";
 import { TagPickerModal } from "./modals/tag-picker";
 import { ExpandPickerModal } from "./modals/expand-picker";
 import { DownloadPickerModal, downloadPapers, buildPaperFilename } from "./modals/download-picker";
+import type { DownloadOutcome } from "./modals/download-picker";
 import { estimatePdfPages, fileInFolder, pdfLinkValue, vaultFolder } from "./paper-files";
 import { SendPickerModal } from "./modals/send-picker";
 import { RecommendPromptModal } from "./modals/recommend-prompt-modal";
@@ -56,10 +57,11 @@ import { StatusPickerModal } from "./modals/status-picker";
 import { PromiseModal } from "./modals/promise-modal";
 import { askChoice } from "./modals/choice-modal";
 import type { BannedPaper } from "./types";
-import { LiteratureNoteManager, readFrontmatterArxiv, setPdfLink } from "./notes/literature";
+import { LiteratureNoteManager, linkPdf, readFrontmatterArxiv, setPdfLink } from "./notes/literature";
 import { hasSummarySection, insertSummaryText } from "./notes/summary-text";
 import { buildCanvas, expandCanvas, resolveNewEdges } from "./canvas/builder";
 import { parseCanvasData } from "./canvas/parse";
+import { isTagGroup, layoutByTag } from "./canvas/tag-layout";
 import { registerCanvasPaperMenu } from "./canvas/node-menu";
 import { hasPaperNode, resolvePaperNodeId, layoutPapers, layoutNewPapers } from "./canvas/layout";
 import { S2RefCache } from "./api/s2-cache";
@@ -259,6 +261,7 @@ export default class CitationGraphPlugin extends Plugin {
         "Canvas: resolve missing citation edges (force refresh)",
         () => this.resolveMissingEdges({ forceRefresh: true }),
       ],
+      ["relayout-by-tag", "Canvas: group papers by tag", () => this.relayoutByTag()],
       ["sync-to-zotero", "Canvas: sync to Zotero", () => this.syncToZotero()],
       ["download-papers", "PDFs: download", () => this.downloadPapersFromCanvas()],
       ["link-zotero-pdfs", "PDFs: link from Zotero", () => this.linkZoteroPdfsOnCanvas()],
@@ -439,27 +442,30 @@ export default class CitationGraphPlugin extends Plugin {
   }
 
   /**
-   * Write arXiv IDs discovered during a download back into their notes, so the
-   * next run finds them recorded and skips the lookup.
+   * Write what a download learned back into the paper notes: arXiv IDs a
+   * lookup found, so the next run skips the lookup, and a `pdf` link to each
+   * saved file. A paper with no note keeps its file and gets no link.
    */
-  private async recordArxivIds(found: Map<string, string>): Promise<void> {
-    for (const [notePath, arxivId] of found) {
+  private async recordDownload(outcome: DownloadOutcome): Promise<void> {
+    const edit = async (notePath: string, what: string, write: (file: TFile) => Promise<void>) => {
       const noteFile = this.app.vault.getAbstractFileByPath(notePath);
-      if (!(noteFile instanceof TFile)) continue;
+      if (!(noteFile instanceof TFile)) return;
       try {
-        await this.app.fileManager.processFrontMatter(
-          noteFile,
-          (fm: Record<string, unknown>) => {
-            if (readFrontmatterArxiv(fm)) return;
-            fm.arxiv = arxivId;
-          }
-        );
+        await write(noteFile);
       } catch (e) {
-        console.error(
-          `Citation Graph: could not record the arXiv ID on ${notePath}`,
-          e
-        );
+        console.error(`Citation Graph: could not record ${what} on ${notePath}`, e);
       }
+    };
+    for (const [notePath, arxivId] of outcome.resolvedArxiv) {
+      await edit(notePath, "the arXiv ID", (file) =>
+        this.app.fileManager.processFrontMatter(file, (fm: Record<string, unknown>) => {
+          if (readFrontmatterArxiv(fm)) return;
+          fm.arxiv = arxivId;
+        })
+      );
+    }
+    for (const [notePath, pdfPath] of outcome.savedPdfs) {
+      await edit(notePath, "the PDF link", (file) => linkPdf(this.app, file, pdfPath));
     }
   }
 
@@ -1884,7 +1890,7 @@ export default class CitationGraphPlugin extends Plugin {
           ? `Downloading "${chosenPapers[0].title}"...`
           : `Downloading ${chosenPapers.length} papers...`
       );
-      const { downloaded, failed, resolvedArxiv } = await downloadPapers(
+      const outcome = await downloadPapers(
         chosenPapers,
         downloadPath,
         adapter,
@@ -1896,7 +1902,8 @@ export default class CitationGraphPlugin extends Plugin {
           resolveArxiv: (paper) => this.findArxivId(paper),
         }
       );
-      await this.recordArxivIds(resolvedArxiv);
+      await this.recordDownload(outcome);
+      const { downloaded, failed } = outcome;
 
       // 9. Report results
       if (failed.length === 0) {
@@ -2157,6 +2164,53 @@ export default class CitationGraphPlugin extends Plugin {
       logNotice(`Refreshed reading status for ${papers} node${papers === 1 ? "" : "s"}.`);
     } catch (e) {
       console.error("Citation Graph: Error refreshing reading status", e);
+      logNotice(`Error: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
+  /**
+   * Rearrange the active canvas into one labelled group per paper tag.
+   *
+   * Tags come from the metadata cache, which is safe here: nothing in this
+   * command writes a note before reading it.
+   */
+  private async relayoutByTag(): Promise<void> {
+    try {
+      const canvasFile = this.findActiveCanvas();
+      if (!canvasFile) {
+        logNotice("Open a citation graph canvas first, then run this command.");
+        return;
+      }
+
+      if (!(await this.confirmPositionReset("Group papers by tag", "Group"))) return;
+
+      const canvasData = await this.readCanvas<CanvasMeta>(canvasFile);
+      const noteManager = new LiteratureNoteManager(
+        this.app,
+        normalizePath(this.settings.collectionsFolder)
+      );
+      const tagOf = new Map<string, string | null>();
+      for (const notePath of notePathsOf(canvasData.nodes)) {
+        const noteFile = this.app.vault.getAbstractFileByPath(notePath);
+        if (noteFile instanceof TFile && noteManager.isPaperNote(noteFile)) {
+          tagOf.set(notePath, noteManager.getPrimaryTag(noteFile));
+        }
+      }
+      if (tagOf.size === 0) {
+        logNotice("No papers on this canvas to group.");
+        return;
+      }
+
+      await this.updateCanvas<CanvasMeta>(canvasFile, (canvas) => {
+        canvas.nodes = layoutByTag(canvas.nodes, tagOf);
+      });
+
+      const groups = new Set(tagOf.values()).size;
+      logNotice(
+        `Grouped ${tagOf.size} paper${tagOf.size === 1 ? "" : "s"} into ${groups} group${groups === 1 ? "" : "s"}.`
+      );
+    } catch (e) {
+      console.error("Citation Graph: Error grouping papers by tag", e);
       logNotice(`Error: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
@@ -2537,6 +2591,16 @@ export default class CitationGraphPlugin extends Plugin {
 
   // ─── Relayout Canvas ───────────────────────────────────────
 
+  /** Ask before a command that moves every paper and discards manual positions. */
+  private confirmPositionReset(title: string, action: string): Promise<boolean> {
+    return askChoice<boolean>(this.app, {
+      title,
+      question: "This will reset all paper positions. Custom positioning will be lost.",
+      choices: [{ text: action, value: true, cta: true }],
+      cancelled: false,
+    });
+  }
+
   private async relayoutCanvas(): Promise<void> {
     try {
       // Find the canvas file
@@ -2546,29 +2610,7 @@ export default class CitationGraphPlugin extends Plugin {
         return;
       }
 
-      // Confirmation dialog
-      const confirmed = await new Promise<boolean>((resolve) => {
-        const modal = new Modal(this.app);
-        modal.onOpen = () => {
-          const { contentEl } = modal;
-          modal.setTitle("Relayout canvas");
-          contentEl.createEl("p", {
-            text: "This will reset all node positions. Custom positioning will be lost.",
-          });
-          const footer = contentEl.createDiv({ cls: "citation-graph-footer" });
-          new ButtonComponent(footer)
-            .setButtonText("Relayout")
-            .setCta()
-            .onClick(() => { resolve(true); modal.close(); });
-          new ButtonComponent(footer)
-            .setButtonText("Cancel")
-            .onClick(() => modal.close());
-        };
-        modal.onClose = () => resolve(false);
-        modal.open();
-      });
-
-      if (!confirmed) return;
+      if (!(await this.confirmPositionReset("Relayout canvas", "Relayout"))) return;
 
       const canvasData = await this.readCanvas<CanvasMeta>(activeFile);
 
@@ -2617,7 +2659,8 @@ export default class CitationGraphPlugin extends Plugin {
       // Move the file nodes onto their new positions and leave every other
       // node where it is.
       await this.updateCanvas<CanvasMeta>(activeFile, (canvas) => {
-        canvas.nodes = canvas.nodes.map((node) => {
+        // Tag groups from "Group papers by tag" would no longer frame anything.
+        canvas.nodes = canvas.nodes.filter((node) => !isTagGroup(node)).map((node) => {
           const updated = newLayoutById.get(node.id);
           return updated
             ? { ...node, x: updated.x, y: updated.y, width: updated.width, height: updated.height }
@@ -3055,7 +3098,7 @@ export default class CitationGraphPlugin extends Plugin {
           }
 
           logNotice(`Downloading ${missingPdf.length} PDF${missingPdf.length > 1 ? "s" : ""}...`);
-          const { resolvedArxiv } = await downloadPapers(
+          const outcome = await downloadPapers(
             missingPdf,
             downloadDir,
             adapter,
@@ -3067,7 +3110,7 @@ export default class CitationGraphPlugin extends Plugin {
               resolveArxiv: (paper) => this.findArxivId(paper),
             },
           );
-          await this.recordArxivIds(resolvedArxiv);
+          await this.recordDownload(outcome);
 
           // Re-resolve paths for the ones we tried to download
           for (const paper of missingPdf) {

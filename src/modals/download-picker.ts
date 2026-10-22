@@ -19,9 +19,10 @@ function isValidArxivId(id: string): boolean {
 /** Sanitize a string for use as a filename: remove/replace problematic chars. */
 export function sanitizeFilename(name: string): string {
   return name
-    // Windows-illegal set plus control characters
+    // Windows-illegal set plus control characters, and # ^ [ ] which no
+    // wikilink can escape: the `pdf` property links to this name.
     // eslint-disable-next-line no-control-regex -- illegal in filenames, matched on purpose
-    .replace(/[<>:"/\\|?*\x00-\x1f]/g, "")
+    .replace(/[<>:"/\\|?*#^[\]\x00-\x1f]/g, "")
     .replace(/\s+/g, " ")
     // Strip trailing dots/spaces which Windows also rejects
     .replace(/[. ]+$/g, "")
@@ -345,6 +346,7 @@ export class DownloadPickerModal extends PromiseModal<DownloadPickerResult | nul
  * paper stored under the DOI of its published version is looked up rather than
  * written off. Any ID it finds comes back in `resolvedArxiv`, keyed by note
  * path, for the caller to record so the next run needs no lookup.
+ * `savedPdfs` maps each downloaded paper's note path to the PDF's vault path.
  */
 export interface DownloadOptions {
   onProgress?: (done: number, total: number, title: string) => void;
@@ -356,6 +358,8 @@ export interface DownloadOutcome {
   failed: string[];
   /** Note path → the arXiv ID a lookup turned up for it during this run. */
   resolvedArxiv: Map<string, string>;
+  /** Note path → vault path of the PDF downloaded for it during this run. */
+  savedPdfs: Map<string, string>;
 }
 
 export async function downloadPapers(
@@ -367,6 +371,7 @@ export async function downloadPapers(
 ): Promise<DownloadOutcome> {
   const { onProgress, resolveArxiv } = opts;
   const resolvedArxiv = new Map<string, string>();
+  const savedPdfs = new Map<string, string>();
   // Validate the download folder up-front: a bad one would otherwise fail
   // every paper one-by-one with the same opaque error.
   try {
@@ -374,7 +379,7 @@ export async function downloadPapers(
   } catch (e) {
     const reason = e instanceof Error ? e.message : String(e);
     logNotice(`Cannot use download folder "${folder}": ${reason}`, 10000);
-    return { downloaded: 0, failed: papers.map((p) => p.title), resolvedArxiv };
+    return { downloaded: 0, failed: papers.map((p) => p.title), resolvedArxiv, savedPdfs };
   }
 
   // Probe the fallback once and gate every per-paper attempt on the result:
@@ -479,6 +484,7 @@ export async function downloadPapers(
       }
 
       downloaded++;
+      if (paper.notePath) savedPdfs.set(paper.notePath, target);
     } catch (e) {
       const reason = e instanceof Error ? e.message : String(e);
       console.error(`Citation Graph: Failed to download "${paper.title}"`, e);
@@ -487,7 +493,7 @@ export async function downloadPapers(
     }
   }
 
-  return { downloaded, failed, resolvedArxiv };
+  return { downloaded, failed, resolvedArxiv, savedPdfs };
 }
 
 /** Create `folder` if it is missing; throw if something other than a folder is there. */

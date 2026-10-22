@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { pdfAttachmentPath } from "./zotero";
+import { localPdfFileUrl, pdfAttachmentPath } from "./zotero";
 
 // Shape of a Zotero 7 local API item search result (toResponseJSONAsync).
 const item = (over: { doi?: string; extra?: string; itemType?: string; link?: Record<string, unknown> | null }) => ({
@@ -61,3 +61,18 @@ describe("pdfAttachmentPath", () => {
     expect(pdfAttachmentPath({ not: "an array" }, "10.1000/abc")).toBeNull();
   });
 });
+
+describe("localPdfFileUrl", () => {
+  it("accepts a local PDF file URL", () => {
+    expect(localPdfFileUrl("file:///home/u/Zotero/storage/AB12/A%20B.PDF\n")).toBe("file:///home/u/Zotero/storage/AB12/A%20B.PDF");
+    expect(localPdfFileUrl("file:///C:/Users/u/Zotero/a.pdf")).toBe("file:///C:/Users/u/Zotero/a.pdf");
+  });
+
+  it("refuses a network share, a non-PDF, another scheme, and junk", () => {
+    expect(localPdfFileUrl("file://server/share/a.pdf")).toBeNull();
+    expect(localPdfFileUrl("file:///home/u/run.sh")).toBeNull();
+    expect(localPdfFileUrl("https://example.org/a.pdf")).toBeNull();
+    expect(localPdfFileUrl("false")).toBeNull();
+  });
+});
+

@@ -149,6 +149,32 @@ function editFrontmatter(
   return app.fileManager.processFrontMatter(file, edit);
 }
 
+/**
+ * Link `pdfPath` (a vault path) from the note's `pdf` property, as a wikilink
+ * so Obsidian keeps it current when the file is renamed or moved. A `pdf`
+ * value already there is the user's or an earlier run's and is left alone,
+ * which also makes repeating the call harmless.
+ */
+export async function linkPdf(app: App, file: TFile, pdfPath: string): Promise<void> {
+  await setPdfLink(app, file, `[[${pdfPath}]]`);
+}
+
+/**
+ * Set the note's `pdf` property to `value` unless it already holds one, which
+ * is the user's or an earlier run's and is left alone. Reports whether it
+ * wrote, so repeating a check over the same notes is harmless and countable.
+ */
+export async function setPdfLink(app: App, file: TFile, value: string): Promise<boolean> {
+  let wrote = false;
+  await editFrontmatter(app, file, (fm) => {
+    if (fm.pdf == null || fm.pdf === "" || fm.pdf === "null") {
+      fm.pdf = value;
+      wrote = true;
+    }
+  });
+  return wrote;
+}
+
 /** A note's frontmatter as an object of unknown values, or null. */
 function frontmatterOf(app: App, file: TFile): Record<string, unknown> | null {
   const fm: unknown = app.metadataCache.getFileCache(file)?.frontmatter;
@@ -298,6 +324,7 @@ ${paper.arxiv ? `**arXiv**: [${escapeNoteText(paper.arxiv)}](https://arxiv.org/a
       fm.citekey = paper.citekey || null;
       fm.semantic_scholar_id = paper.semanticScholarId || null;
       fm.status = "unread" satisfies PaperStatus;
+      fm.tags = [];
       fm.cssclasses = withNoteClass(fm.cssclasses, "unread");
     });
     paper.notePath = path;
@@ -382,6 +409,14 @@ ${paper.arxiv ? `**arXiv**: [${escapeNoteText(paper.arxiv)}](https://arxiv.org/a
     const fm = frontmatterOf(this.app, file);
     if (!fm) return false;
     return PAPER_ID_FIELDS.some((key) => key in fm);
+  }
+
+  /**
+   * The tag a paper is grouped under: the first one in its `tags` frontmatter,
+   * or null when it has none.
+   */
+  getPrimaryTag(file: TFile): string | null {
+    return readFrontmatterTags(frontmatterOf(this.app, file)?.tags)[0] ?? null;
   }
 
   /**
@@ -541,6 +576,19 @@ export function withNoteClass(
 }
 
 /**
+ * Read a `tags` frontmatter value as a list of tag names without the `#`.
+ * Obsidian accepts a list or a single string separated by commas or spaces.
+ */
+export function readFrontmatterTags(value: unknown): string[] {
+  const raw = Array.isArray(value)
+    ? value.filter((t) => typeof t === "string" || typeof t === "number").map(String)
+    : typeof value === "string"
+      ? value.split(/[,\s]+/)
+      : [];
+  return raw.map((t) => t.trim().replace(/^#/, "")).filter((t) => t !== "");
+}
+
+/**
  * Read a note's `cssclasses` frontmatter as a list. Obsidian accepts either a
  * single string or a list, and hand-edited notes may carry either.
  */
@@ -590,20 +638,4 @@ function indexNote(
   add(index.byCitekey, ids.citekey);
   add(index.byS2, ids.semanticScholarId);
   add(index.byTitle, ids.title);
-}
-
-/**
- * Set the note's `pdf` property to `value` unless it already holds one, which
- * is the user's or an earlier run's and is left alone. Reports whether it
- * wrote, so repeating a check over the same notes is harmless and countable.
- */
-export async function setPdfLink(app: App, file: TFile, value: string): Promise<boolean> {
-  let wrote = false;
-  await editFrontmatter(app, file, (fm) => {
-    if (fm.pdf == null || fm.pdf === "" || fm.pdf === "null") {
-      fm.pdf = value;
-      wrote = true;
-    }
-  });
-  return wrote;
 }

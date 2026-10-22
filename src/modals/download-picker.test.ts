@@ -52,6 +52,14 @@ function lastFailureReason(): string {
 	return failure ? failure.split("\n").slice(1).join("\n") : "";
 }
 
+describe("buildPaperFilename", () => {
+	// The name ends up inside a wikilink in the note's `pdf` property.
+	it("drops characters a wikilink cannot carry", () => {
+		const name = buildPaperFilename(makePaper({ title: "[Re] C# ^2 [x]|y" }), ".pdf");
+		expect(name).toBe("Re C 2 xy (Curie) (1903).pdf");
+	});
+});
+
 describe("downloadPapers", () => {
 	// The vault on disk, and the download folder inside it.
 	let vault: string;
@@ -164,6 +172,27 @@ describe("downloadPapers", () => {
 
 		expect(result).toMatchObject({ downloaded: 1, failed: [] });
 		expect(fs.readdirSync(dir)).toEqual([buildPaperFilename(paper, ".pdf")]);
+	});
+
+	it("reports where each saved PDF went, keyed by note, for papers with a note", async () => {
+		getDownloadFallback.mockReturnValue(
+			makeFallback({
+				download: async (_paper, outputDir) => {
+					const saved = path.join(outputDir, "raw-download.pdf");
+					fs.writeFileSync(saved, "%PDF-1.4");
+					return saved;
+				},
+			}),
+		);
+		const withNote = makePaper({ title: "Noted", notePath: "Notes/Noted.md" });
+		const without = makePaper({ title: "Unnoted" });
+
+		const result = await downloadPapers([withNote, without], folder, adapter, "/plugin");
+
+		expect(result.downloaded).toBe(2);
+		expect([...result.savedPdfs]).toEqual([
+			["Notes/Noted.md", `${folder}/${buildPaperFilename(withNote, ".pdf")}`],
+		]);
 	});
 
 	it("passes the plugin directory to the fallback", async () => {

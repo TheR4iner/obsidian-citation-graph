@@ -4,8 +4,10 @@ import { nextStatusInCycle } from "../types";
 import {
 	LiteratureNoteManager,
 	bodyHasUserContent,
+	linkPdf,
 	readFrontmatterArxiv,
 	setPdfLink,
+	readFrontmatterTags,
 	withNoteClass,
 } from "./literature";
 import { makeNote, makeVault } from "../../test/fakes";
@@ -525,5 +527,59 @@ describe("setPdfLink", () => {
 		const note = makeNote({ fm: { doi: "10.1000/xyz", pdf: "[[mine.pdf]]" } });
 		expect(await setPdfLink(note.app, note.file, "file:///z/a.pdf")).toBe(false);
 		expect(note.fm()?.pdf).toBe("[[mine.pdf]]");
+	});
+});
+
+describe("readFrontmatterTags", () => {
+	it("reads a list, dropping a leading # and blanks", () => {
+		expect(readFrontmatterTags(["#ml", "theory", " ", null])).toEqual(["ml", "theory"]);
+	});
+
+	it("reads a comma- or space-separated string", () => {
+		expect(readFrontmatterTags("ml, theory #optics")).toEqual(["ml", "theory", "optics"]);
+	});
+
+	it("reads a missing or malformed value as no tags", () => {
+		expect(readFrontmatterTags(undefined)).toEqual([]);
+		expect(readFrontmatterTags({ tag: "ml" })).toEqual([]);
+	});
+});
+
+describe("LiteratureNoteManager.getPrimaryTag", () => {
+	const primaryTag = (fm: Record<string, unknown> | null): string | null => {
+		const note = makeNote({ fm });
+		return new LiteratureNoteManager(note.app, "papers").getPrimaryTag(note.file);
+	};
+
+	it("is the first tag", () => {
+		expect(primaryTag({ doi: "10.1/x", tags: ["optics", "ml"] })).toBe("optics");
+	});
+
+	it("is null for an untagged or frontmatter-less note", () => {
+		expect(primaryTag({ doi: "10.1/x", tags: [] })).toBeNull();
+		expect(primaryTag(null)).toBeNull();
+	});
+});
+
+describe("linkPdf", () => {
+	const note = "papers/A.md";
+
+	it("writes a wikilink to the PDF", async () => {
+		const vault = makeVault({ [note]: { fm: { doi: null } } });
+		await linkPdf(vault.app, vault.file(note), "PDFs/A (B) (2020).pdf");
+		expect(vault.notes.get(note)!.fm!.pdf).toBe("[[PDFs/A (B) (2020).pdf]]");
+	});
+
+	it("fills a null placeholder", async () => {
+		const vault = makeVault({ [note]: { fm: { pdf: null } } });
+		await linkPdf(vault.app, vault.file(note), "x.pdf");
+		expect(vault.notes.get(note)!.fm!.pdf).toBe("[[x.pdf]]");
+	});
+
+	it("leaves an existing link alone, so repeating it changes nothing", async () => {
+		const vault = makeVault({ [note]: { fm: { pdf: "[[mine.pdf]]" } } });
+		await linkPdf(vault.app, vault.file(note), "x.pdf");
+		await linkPdf(vault.app, vault.file(note), "x.pdf");
+		expect(vault.notes.get(note)!.fm!.pdf).toBe("[[mine.pdf]]");
 	});
 });

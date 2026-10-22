@@ -210,8 +210,7 @@ export class ZoteroClient {
       const attachment = pdfAttachmentPath(found, doi);
       if (!attachment) continue;
       // Zotero 7 answers this with the attachment's file URL as plain text.
-      const url = (await localGetText(`${attachment}/file/view/url`)).trim();
-      return url.startsWith("file://") ? url : null;
+      return localPdfFileUrl(await localGetText(`${attachment}/file/view/url`));
     }
     return null;
   }
@@ -362,4 +361,22 @@ export function pdfAttachmentPath(searchResults: unknown, doi: string): string |
     if (/^\/api\/(?:users|groups)\/\d+\/items\/[A-Z0-9]+$/.test(pathname)) return pathname;
   }
   return null;
+}
+
+/**
+ * Accept Zotero's answer as a link only when it is a host-less `file://` URL
+ * of a `.pdf`. A linked attachment in a group library points wherever another
+ * member chose, and the link is handed to the system to open: a non-PDF file
+ * would open in whatever handles its type, and a URL naming a host (a network
+ * share on Windows) would make the system connect to it.
+ */
+export function localPdfFileUrl(text: string): string | null {
+  let url: URL;
+  try {
+    url = new URL(text.trim());
+  } catch {
+    return null;
+  }
+  if (url.protocol !== "file:" || url.host !== "") return null;
+  return /\.pdf$/i.test(url.pathname) ? url.href : null;
 }
