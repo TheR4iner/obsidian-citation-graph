@@ -6,6 +6,16 @@ Each released version here is also the body of the matching [GitHub release](htt
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-10-27
+
+### Added
+
+- A *PDF viewer* setting chooses where PDFs open: in Obsidian, as before, or in your system's default PDF app. With *System default app*, clicking a link to a PDF, its canvas card or its name in the file list opens the file in that app instead of an Obsidian tab. PDFs embedded in a note still show inline.
+
+### Fixed
+
+- *PDFs: download* now saves to the *Default download folder* you set, even on a canvas that has downloaded before. Until now a canvas kept using the folder of its last download, so changing the setting had no effect on it. The folder a canvas remembers is still used when the setting is empty.
+
 ## [0.9.0] - 2026-10-22
 
 ### Added
@@ -189,7 +199,8 @@ First public release.
 - **Sync canvas to Zotero**, **Send papers to canvas**, **Relayout canvas**, **Delete paper**, and **Clear Semantic Scholar cache**.
 - Settings for the collections folder, the Zotero and Semantic Scholar API keys, node size, the five status colours, and the full LLM configuration.
 
-[Unreleased]: https://github.com/TheR4iner/obsidian-citation-graph/compare/0.9.0...HEAD
+[Unreleased]: https://github.com/TheR4iner/obsidian-citation-graph/compare/0.10.0...HEAD
+[0.10.0]: https://github.com/TheR4iner/obsidian-citation-graph/compare/0.9.0...0.10.0
 [0.9.0]: https://github.com/TheR4iner/obsidian-citation-graph/compare/0.8.0...0.9.0
 [0.8.0]: https://github.com/TheR4iner/obsidian-citation-graph/compare/0.7.2...0.8.0
 [0.7.2]: https://github.com/TheR4iner/obsidian-citation-graph/compare/0.7.1...0.7.2
