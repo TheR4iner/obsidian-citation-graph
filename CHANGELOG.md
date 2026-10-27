@@ -6,6 +6,10 @@ Each released version here is also the body of the matching [GitHub release](htt
 
 ## [Unreleased]
 
+### Added
+
+- A *PDF viewer* setting chooses where PDFs open: in Obsidian, as before, or in your system's default PDF app. With *System default app*, clicking a link to a PDF, its canvas card or its name in the file list opens the file in that app instead of an Obsidian tab. PDFs embedded in a note still show inline.
+
 ### Fixed
 
 - *PDFs: download* now saves to the *Default download folder* you set, even on a canvas that has downloaded before. Until now a canvas kept using the folder of its last download, so changing the setting had no effect on it. The folder a canvas remembers is still used when the setting is empty.

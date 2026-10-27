@@ -313,6 +313,7 @@ The provider chosen here is also the one *Recommend papers* uses.
 | Setting | Description | Default |
 |---|---|---|
 | **Default download folder** | Vault folder where PDFs are saved and where *Write summary* looks for them. To keep PDFs out of git or Obsidian Sync, see [Keeping PDFs out of version control or sync](#what-this-plugin-sends-reads-and-costs). It takes precedence over the folder a canvas remembers from its last download | |
+| **PDF viewer** | Where a PDF in the vault opens when you click a link to it, its canvas card or its name in the file list: *Obsidian* or *System default app*, the program your computer opens PDFs with. It applies to every PDF in the vault; PDFs embedded in a note still show inline | Obsidian |
 
 ### Banned papers
 

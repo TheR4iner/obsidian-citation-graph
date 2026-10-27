@@ -36,6 +36,7 @@ import {
   STATUS_LABELS,
 } from "./types";
 import { CitationGraphSettingTab } from "./settings";
+import { routePdfOpens } from "./pdf-viewer";
 import { ZoteroClient, ZoteroUnreachableError } from "./api/zotero";
 import { SemanticScholarClient } from "./api/semantic-scholar";
 import { OpenAlexClient } from "./api/openalex";
@@ -255,6 +256,7 @@ export default class CitationGraphPlugin extends Plugin {
 
     this.registerCommands();
     this.registerPaperContextMenu();
+    this.register(routePdfOpens(this.app, () => this.settings.pdfViewer === "system"));
   }
 
   /**

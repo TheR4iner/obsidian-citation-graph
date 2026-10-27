@@ -555,6 +555,25 @@ export class CitationGraphSettingTab extends PluginSettingTab {
             placeholder: "Papers/PDFs",
             folder: true,
           }),
+          {
+            name: "PDF viewer",
+            desc:
+              "Where PDFs open when you click a link to one, a canvas card or the file list. " +
+              "System default app hands every PDF in the vault to the program your computer opens PDFs with; " +
+              "PDFs embedded in a note still show inline",
+            build: (setting) => {
+              setting.addDropdown((dropdown) =>
+                dropdown
+                  .addOption("obsidian", "Obsidian")
+                  .addOption("system", "System default app")
+                  .setValue(settings.pdfViewer)
+                  .onChange(async (value) => {
+                    settings.pdfViewer = value === "system" ? "system" : "obsidian";
+                    await this.plugin.saveSettings();
+                  })
+              );
+            },
+          },
         ],
       },
       {

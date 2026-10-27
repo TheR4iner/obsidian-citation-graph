@@ -194,6 +194,8 @@ export interface CitationGraphSettings {
 	recommendMaxOutputTokens: number;
 	/** Look up papers added to a canvas in the local Zotero and link a stored PDF. */
 	linkZoteroPdfs: boolean;
+	/** Where PDFs open: Obsidian's built-in viewer or the system's default app. */
+	pdfViewer: "obsidian" | "system";
 }
 
 export const DEFAULT_SETTINGS: CitationGraphSettings = {
@@ -224,6 +226,7 @@ export const DEFAULT_SETTINGS: CitationGraphSettings = {
 	recommendWebSearch: true,
 	recommendMaxOutputTokens: 4096,
 	linkZoteroPdfs: true,
+	pdfViewer: "obsidian",
 };
 
 /** The configured canvas color for a given display status. */
