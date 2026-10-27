@@ -6,6 +6,10 @@ Each released version here is also the body of the matching [GitHub release](htt
 
 ## [Unreleased]
 
+### Fixed
+
+- *PDFs: download* now saves to the *Default download folder* you set, even on a canvas that has downloaded before. Until now a canvas kept using the folder of its last download, so changing the setting had no effect on it. The folder a canvas remembers is still used when the setting is empty.
+
 ## [0.9.0] - 2026-10-22
 
 ### Added

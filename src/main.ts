@@ -2028,10 +2028,12 @@ export default class CitationGraphPlugin extends Plugin {
       // 6. Decide where the PDFs go, and ask which papers only when there is
       //    a question to ask. Picking one paper and running the command is
       //    already an answer; a modal offering that single paper back with a
-      //    checkbox beside it adds a click and no information.
+      //    checkbox beside it adds a click and no information. The setting
+      //    beats the folder this canvas remembers, or changing it would never
+      //    reach a canvas that has downloaded before.
       const knownPath =
-        canvasData.citationGraphMeta?.lastDownloadPath ||
         this.settings.defaultDownloadPath ||
+        canvasData.citationGraphMeta?.lastDownloadPath ||
         "";
 
       let downloadPath: string;

@@ -189,7 +189,7 @@ The list lives in the canvas file, so it travels with the canvas. Review it, or 
 
 ### Download
 
-**Download** saves as `Title (FirstAuthor) (Year).pdf` in a folder of your vault, created if it does not exist. With exactly one paper selected and a download folder already known (the canvas's last one, or the *Default download folder* setting), it downloads straight away; otherwise it opens a picker where you choose the papers and the folder, with your vault's folders suggested as you type. Papers already in the folder are marked `downloaded` and left unchecked.
+**Download** saves as `Title (FirstAuthor) (Year).pdf` in a folder of your vault, created if it does not exist. With exactly one paper selected and a download folder already known (the *Default download folder* setting, or else the canvas's last one), it downloads straight away; otherwise it opens a picker where you choose the papers and the folder, with your vault's folders suggested as you type. Papers already in the folder are marked `downloaded` and left unchecked.
 
 **Each downloaded PDF is linked from its paper note**, as a `pdf` frontmatter property holding a wikilink such as `pdf: "[[Papers/PDFs/Title (Author) (Year).pdf]]"`, so the file opens from the note and Obsidian keeps the link current if you move or rename it. A `pdf` value already in the note is left as it is, so downloading again never adds a second link and never replaces one you set yourself. The note body also gets an *Open PDF* link to the same file, which shows on the paper's canvas card. See [Literature notes](#literature-notes). The same happens when *Write summary* downloads a missing PDF. Characters a wikilink cannot carry (`#`, `^`, `[`, `]`) are left out of the filename.
 
@@ -312,7 +312,7 @@ The provider chosen here is also the one *Recommend papers* uses.
 
 | Setting | Description | Default |
 |---|---|---|
-| **Default download folder** | Vault folder where PDFs are saved and where *Write summary* looks for them. To keep PDFs out of git or Obsidian Sync, see [Keeping PDFs out of version control or sync](#what-this-plugin-sends-reads-and-costs) | |
+| **Default download folder** | Vault folder where PDFs are saved and where *Write summary* looks for them. To keep PDFs out of git or Obsidian Sync, see [Keeping PDFs out of version control or sync](#what-this-plugin-sends-reads-and-costs). It takes precedence over the folder a canvas remembers from its last download | |
 
 ### Banned papers
 

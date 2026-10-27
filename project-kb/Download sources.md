@@ -44,9 +44,11 @@ Already-downloaded detection matches the formatted filename (`Title (FirstAuthor
 
 ## Skipping the picker
 
-With exactly one paper targeted and a download folder already known (the canvas's `lastDownloadPath`, else the `defaultDownloadPath` setting), the command downloads without opening the picker. A modal offering back the single paper the user just selected, with a checkbox beside it, asks a question that has already been answered. The picker still opens for several papers, and whenever no folder is known, because that is the only place to enter one.
+With exactly one paper targeted and a download folder already known (the `defaultDownloadPath` setting, else the canvas's `lastDownloadPath`), the command downloads without opening the picker. A modal offering back the single paper the user just selected, with a checkbox beside it, asks a question that has already been answered. The picker still opens for several papers, and whenever no folder is known, because that is the only place to enter one.
 
 ## History
+
+**2026-10-27 -- the setting beats the canvas's remembered folder.** The download command preferred `lastDownloadPath` over `defaultDownloadPath`, so a canvas that had downloaded once (for example into `papers`) kept using that folder after the user changed the setting. Order swapped in the download command; *Write summary* already downloaded into the setting and only searches the remembered folder.
 
 **2026-10-22 -- link the downloaded PDF from the note (#56).** Added `savedPdfs` to the outcome, `linkPdf()`, and `recordDownload` (which replaced `recordArxivIds` and handles both write-backs with one error path). See *Linking the PDF from the note*.
 
