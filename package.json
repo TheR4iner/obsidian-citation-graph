@@ -1,6 +1,6 @@
 {
   "name": "obsidian-citation-graph",
-  "version": "0.9.0",
+  "version": "0.10.0",
   "description": "Create Litmaps-style citation graph canvases from Zotero collections",
   "main": "main.js",
   "scripts": {
