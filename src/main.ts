@@ -56,6 +56,7 @@ import { SendPickerModal } from "./modals/send-picker";
 import { RecommendPromptModal } from "./modals/recommend-prompt-modal";
 import { RecommendPickerModal } from "./modals/recommend-picker";
 import { StatusPickerModal } from "./modals/status-picker";
+import { CanvasSearchModal, type CanvasSearchItem } from "./modals/canvas-search";
 import { PromiseModal } from "./modals/promise-modal";
 import { askChoice } from "./modals/choice-modal";
 import type { BannedPaper } from "./types";
@@ -149,9 +150,24 @@ function paintStatusColors(nodes: CanvasNode[], colors: Map<string, string>): vo
  */
 interface CanvasViewInternals {
   file?: unknown;
-  canvas?: {
-    selection?: Iterable<{ filePath?: string; file?: { path?: string } }>;
-  };
+  canvas?: LiveCanvas;
+}
+
+interface LiveCanvas {
+  selection?: Iterable<LiveCanvasNode>;
+  nodes?: Map<string, LiveCanvasNode>;
+  zoomToBbox?(bbox: { minX: number; minY: number; maxX: number; maxY: number }): void;
+}
+
+interface LiveCanvasNode {
+  id?: string;
+  filePath?: string;
+  file?: { path?: string };
+  nodeEl?: HTMLElement;
+  x?: number;
+  y?: number;
+  width?: number;
+  height?: number;
 }
 
 /** Read a workspace leaf as a canvas view. */
@@ -293,6 +309,7 @@ export default class CitationGraphPlugin extends Plugin {
         () => this.updateFromCollection(),
       ],
       ["sync-to-zotero", "Canvas: sync to Zotero", () => this.syncToZotero()],
+      ["search-canvas", "Canvas: search papers", () => this.searchCanvas()],
       ["download-papers", "PDFs: download", () => this.downloadPapersFromCanvas()],
       ["link-zotero-pdfs", "PDFs: link from Zotero", () => this.linkZoteroPdfsOnCanvas()],
       ["add-paper-by-doi", "Papers: add by DOI or arXiv", () => this.addPaperByDoi()],
@@ -1302,6 +1319,7 @@ export default class CitationGraphPlugin extends Plugin {
       // Check if paper is already on canvas
       const existingNodeIds = new Set(canvasData.nodes.map((n) => n.id));
       if (hasPaperNode(paper, existingNodeIds)) {
+        this.revealNode(activeFile, resolvePaperNodeId(paper, existingNodeIds), true);
         logNotice("This paper is already on the canvas.");
         return;
       }
@@ -2702,6 +2720,76 @@ export default class CitationGraphPlugin extends Plugin {
     );
 
     return colors;
+  }
+
+  /** The live canvas object of the open view showing this file, if any. */
+  private liveCanvasOf(file: TFile): LiveCanvas | null {
+    for (const leaf of this.app.workspace.getLeavesOfType("canvas")) {
+      const view = canvasViewOf(leaf);
+      if (view.file === file) return view.canvas ?? null;
+    }
+    return null;
+  }
+
+  /**
+   * Zoom the open canvas to one node, with a node's worth of margin so its
+   * neighbours stay in view, and optionally flash it.
+   */
+  private revealNode(file: TFile, nodeId: string, flash = false): void {
+    const canvas = this.liveCanvasOf(file);
+    const node = canvas?.nodes?.get(nodeId);
+    if (!canvas || !node) return;
+    const { x, y, width, height } = node;
+    if (x !== undefined && y !== undefined && width !== undefined && height !== undefined) {
+      canvas.zoomToBbox?.({
+        minX: x - width,
+        minY: y - height,
+        maxX: x + 2 * width,
+        maxY: y + 2 * height,
+      });
+    }
+    const el = node.nodeEl;
+    if (flash && el) {
+      el.addClass("citation-graph-flash");
+      el.addEventListener("animationend", () => el.removeClass("citation-graph-flash"), {
+        once: true,
+      });
+    }
+  }
+
+  /** Highlight these nodes and dim every other one; an empty set clears both. */
+  private markSearchHits(canvas: LiveCanvas, hitIds: Set<string>): void {
+    for (const node of canvas.nodes?.values() ?? []) {
+      const hit = node.id !== undefined && hitIds.has(node.id);
+      node.nodeEl?.toggleClass("citation-graph-search-hit", hit);
+      node.nodeEl?.toggleClass("citation-graph-search-miss", hitIds.size > 0 && !hit);
+    }
+  }
+
+  // ─── Search Canvas ──────────────────────────────────────
+
+  private searchCanvas(): void {
+    const file = this.findActiveCanvas();
+    const canvas = file ? this.liveCanvasOf(file) : null;
+    if (!file || !canvas?.nodes) {
+      logNotice("Open a citation graph canvas first, then run this command.");
+      return;
+    }
+    const items: CanvasSearchItem[] = [];
+    for (const node of canvas.nodes.values()) {
+      const notePath = node.filePath ?? node.file?.path;
+      if (!node.id || !notePath) continue;
+      const fm = this.frontmatterOf(notePath);
+      if (!fm) continue;
+      const paper = paperFromFrontmatter(fm, node.id, notePath);
+      items.push({ nodeId: node.id, title: paper.title, authors: paper.authors, year: paper.year });
+    }
+    new CanvasSearchModal(
+      this.app,
+      items,
+      (ids) => this.markSearchHits(canvas, ids),
+      (id) => this.revealNode(file, id)
+    ).open();
   }
 
   /** The canvas the user is working in: the active file, else any open canvas. */
