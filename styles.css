@@ -719,3 +719,25 @@
   width: 100%;
   margin-bottom: 12px;
 }
+
+/* Canvas search: matches glow, everything else fades back. */
+.canvas-node.citation-graph-search-hit {
+  box-shadow: 0 0 0 6px var(--interactive-accent), 0 0 32px 8px var(--interactive-accent);
+  border-radius: var(--radius-m);
+}
+
+.canvas-node.citation-graph-search-miss {
+  opacity: 0.25;
+}
+
+/* A paper that was already on the canvas pulses when added again. */
+.canvas-node.citation-graph-flash {
+  animation: citation-graph-flash 0.6s ease-in-out 3;
+  border-radius: var(--radius-m);
+}
+
+@keyframes citation-graph-flash {
+  50% {
+    box-shadow: 0 0 0 8px var(--interactive-accent), 0 0 40px 12px var(--interactive-accent);
+  }
+}

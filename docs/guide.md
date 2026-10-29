@@ -93,7 +93,7 @@ A first run over a large collection takes a few minutes, and a [Semantic Scholar
 
 All are in the command palette under `Citation Graph:`, grouped by a second prefix so that typing the group narrows the list: **Canvas**, **Papers**, **Reading**, **PDFs**, **Maintenance**. The rest of this page refers to each command by its short name.
 
-Only three of them work without a canvas open: *Create from collection*, *Create from tag* and *Clear Semantic Scholar cache*. The other eighteen are hidden from the palette until a canvas is open, so the list stays short while you are reading a note.
+Only three of them work without a canvas open: *Create from collection*, *Create from tag* and *Clear Semantic Scholar cache*. The other nineteen are hidden from the palette until a canvas is open, so the list stays short while you are reading a note.
 
 | Command | What it does |
 |---|---|
@@ -105,6 +105,7 @@ Only three of them work without a canvas open: *Create from collection*, *Create
 | **Canvas: resolve missing citation edges** | Re-checks every paper on the canvas and draws the edges it is missing; **(force refresh)** bypasses the local cache |
 | **Canvas: sync to Zotero** | Pushes the canvas's papers back to a Zotero collection |
 | **Canvas: send papers to another canvas** | Copies or moves papers, with their edges, to another canvas |
+| **Canvas: search papers** | Highlights every paper whose title or authors match what you type. See [Searching the canvas](#searching-the-canvas) |
 | **Papers: expand paper** | Adds a paper's references and citing works; **(force refresh)** bypasses the local cache |
 | **Papers: add by DOI or arXiv** | Adds one paper from a DOI, an arXiv ID, or a URL containing either |
 | **Papers: recommend papers** | Asks the LLM which papers would fit this canvas, verifies them, and adds the ones you pick |
@@ -177,6 +178,7 @@ Tags are matched without regard to case, as Obsidian does, and only the frontmat
 
 Each picker row shows the first 200 characters of the paper's abstract, followed by a **Show more** link when there is more to read. It unfolds the full abstract in place, and **Show less** folds it back. Unfolded abstracts stay open while you search, filter by year or ban a row, so deciding on a paper never means closing the dialog.
 
+
 ### Marking papers uninteresting
 
 Every row in the *Expand paper* and *Recommend papers* pickers carries a small cross button that marks that paper uninteresting rather than adding it. **Add selected & ban rest** does the same in bulk: it adds what you ticked and marks everything else in the list. Banned papers are filtered out of every later picker for that canvas, so a paper you have already rejected does not keep reappearing each time you expand a neighbour.
@@ -224,6 +226,12 @@ The closing notice reports how many edges were added, how many papers came from 
 ### Rate limits
 
 **Semantic Scholar rate limits are retried, not swallowed.** Verification is one request per suggestion against a service that allows roughly 100 every 5 minutes without an API key, so ten suggestions take about half a minute and can be throttled anyway. A refused request is retried after 5, 15 and 45 seconds, and the notice says so while it waits. When *Expand paper* still cannot reach Semantic Scholar, it shows the references OpenAlex and Crossref found, says the list may be missing papers, and does not cache it, so expanding again later fetches the full list. If it is still refused, verification stops and reports the remaining suggestions as *never checked* rather than discarding them as nonexistent. An API key raises the ceiling and cuts the spacing between requests from 3 seconds to 1, and takes effect as soon as you enter it.
+
+### Searching the canvas
+
+**Search papers** lists the papers on the open canvas whose title or author names contain every word you type, ignoring case and accents. While you type, the matches glow on the canvas and every other node fades. Choosing a result zooms to it and keeps the highlights; closing the search without choosing (Escape) clears them, so running the search and pressing Escape is how you remove old highlights.
+
+**Adding a paper that is already there.** When *Add by DOI or arXiv* finds the paper on the canvas, it zooms to the existing node and makes it pulse a few times instead of adding a copy.
 
 ### Send papers to canvas
 
