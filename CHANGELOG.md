@@ -10,6 +10,7 @@ Each released version here is also the body of the matching [GitHub release](htt
 
 - *Canvas: search papers* finds papers on the open canvas by title or author. Every match glows while the rest of the canvas fades, choosing a result zooms to it, and closing the search with Escape clears the highlights.
 - *Papers: add by DOI or arXiv* now zooms to the paper and makes it flash when the canvas already has it, instead of only saying so.
+- Each paper in the *Expand paper* and *Recommend papers* lists links to its arXiv page, or its publisher page through its DOI, so you can look a paper up before adding it.
 
 ## [0.10.0] - 2026-10-27
 

@@ -178,6 +178,7 @@ Tags are matched without regard to case, as Obsidian does, and only the frontmat
 
 Each picker row shows the first 200 characters of the paper's abstract, followed by a **Show more** link when there is more to read. It unfolds the full abstract in place, and **Show less** folds it back. Unfolded abstracts stay open while you search, filter by year or ban a row, so deciding on a paper never means closing the dialog.
 
+Each row also links to the paper's page, opened in your browser: its arXiv abstract page when the paper has an arXiv ID, else its DOI (the publisher's page), else its OpenAlex or Semantic Scholar record. Papers that came from OpenAlex or Crossref, because Semantic Scholar was unreachable, carry no arXiv ID, so they link by DOI.
 
 ### Marking papers uninteresting
 
