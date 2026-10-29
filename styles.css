@@ -261,6 +261,7 @@
 .citation-graph-paper-info {
   flex: 1;
   min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .citation-graph-paper-info strong {

@@ -12,6 +12,10 @@ Each released version here is also the body of the matching [GitHub release](htt
 - *Papers: add by DOI or arXiv* now zooms to the paper and makes it flash when the canvas already has it, instead of only saying so.
 - Each paper in the *Expand paper* and *Recommend papers* lists links to its arXiv page, or its publisher page through its DOI, so you can look a paper up before adding it.
 
+### Fixed
+
+- An abstract containing a very long unbroken string (such as raw markup) no longer makes the *Expand paper* and *Recommend papers* lists scroll sideways.
+
 ## [0.10.0] - 2026-10-27
 
 ### Added
