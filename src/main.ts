@@ -8,7 +8,6 @@ import {
   FuzzySuggestModal,
   Modal,
   ButtonComponent,
-  moment,
   type WorkspaceLeaf,
 } from "obsidian";
 import { initLog, logNotice, logOnly } from "./log";
@@ -760,7 +759,7 @@ export default class CitationGraphPlugin extends Plugin {
           toPlace,
           {
             id: `${UPDATE_GROUP_PREFIX}${Date.now().toString(36)}`,
-            label: `New from Zotero (${moment().format("YYYY-MM-DD")})`,
+            label: `New from Zotero (${new Date().toLocaleDateString("sv-SE")})`,
           },
           { nodeWidth: this.settings.nodeWidth, nodeHeight: this.settings.nodeHeight }
         );
