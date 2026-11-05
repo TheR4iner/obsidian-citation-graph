@@ -20,7 +20,7 @@
   ],
   "license": "MIT",
   "devDependencies": {
-    "@types/node": "^26.6.5",
+    "@types/node": "^26.6.6",
     "esbuild": "^0.28.2",
     "eslint": "^10.14.0",
     "eslint-plugin-obsidianmd": "^0.4.2",
