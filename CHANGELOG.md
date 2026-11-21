@@ -6,6 +6,10 @@ Each released version here is also the body of the matching [GitHub release](htt
 
 ## [Unreleased]
 
+### Changed
+
+- Downloaded PDFs now go in a subfolder named after the canvas, inside the download folder, so each canvas's papers stay together. PDFs already saved directly in the download folder are still found by *Download* and *Write summary*, and are not moved.
+
 ### Added
 
 - *Canvas: search papers* finds papers on the open canvas by title or author. Every match glows while the rest of the canvas fades, choosing a result zooms to it, and closing the search with Escape clears the highlights.

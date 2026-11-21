@@ -34,7 +34,7 @@ Every per-paper command is also on the right-click menu of a canvas node. No Zot
 |---|---|
 | Faster citation lookups | A free [Semantic Scholar API key](https://www.semanticscholar.org/product/api#api-key-form). Without one, a large collection takes minutes |
 | Summaries and recommendations | A provider under Settings, Summaries (see below) |
-| PDF downloads | A vault folder under *Default download folder*, or pick one when downloading |
+| PDF downloads | A vault folder under *Default download folder*, or pick one when downloading; each canvas's PDFs go in a subfolder named after it |
 | Opening PDFs in your own PDF viewer | *PDF viewer* set to *System default app* |
 | Opening Zotero PDFs from notes | Zotero running when papers are added, or run *PDFs: link from Zotero* later. Turn off with *Link Zotero PDFs* |
 | Syncing back to Zotero | A Zotero API key and user ID from [zotero.org/settings/keys](https://www.zotero.org/settings/keys) |
