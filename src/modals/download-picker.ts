@@ -92,6 +92,7 @@ export class DownloadPickerModal extends PromiseModal<DownloadPickerResult | nul
     app: App,
     private papers: Paper[],
     lastDownloadPath: string,
+    private canvasName: string,
     private vaultBasePath: string,
   ) {
     super(app);
@@ -112,9 +113,14 @@ export class DownloadPickerModal extends PromiseModal<DownloadPickerResult | nul
     } catch {
       // Not a vault folder (yet): the user may be mid-typing. Nothing to match.
     }
-    const dir = folder === null ? null : folder === "" ? this.app.vault.getRoot() : this.app.vault.getFolderByPath(folder);
-    if (dir) {
-      existingFiles = dir.children
+    // Downloads go in a subfolder named after the canvas; PDFs saved directly
+    // in the folder before that still count.
+    if (folder !== null) {
+      const dirs = [
+        folder === "" ? this.app.vault.getRoot() : this.app.vault.getFolderByPath(folder),
+        this.app.vault.getFolderByPath(fileInFolder(folder, this.canvasName)),
+      ];
+      existingFiles = dirs.flatMap((dir) => dir?.children ?? [])
         .filter((child) => child instanceof TFile)
         .map((child) => child.name.toLowerCase());
     }
@@ -171,7 +177,7 @@ export class DownloadPickerModal extends PromiseModal<DownloadPickerResult | nul
     new FolderSuggest(this.app, pathInput);
     contentEl.createDiv({
       cls: "citation-graph-download-path-hint",
-      text: "A folder in this vault. It is created if it does not exist.",
+      text: `A folder in this vault. PDFs go in its "${this.canvasName}" subfolder, created if it does not exist.`,
     });
     // Debounced so the list is not rebuilt on every keystroke.
     pathInput.addEventListener("input", () => {

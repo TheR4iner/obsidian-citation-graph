@@ -5,7 +5,7 @@ import obsidianmd from "eslint-plugin-obsidianmd";
 // rather than in the community directory's scan.
 export default defineConfig([
   {
-    ignores: ["main.js", "node_modules/**", "docs/**", "project-kb/**"],
+    ignores: ["main.js", "node_modules/**", "docs/**", "project-kb/**", ".claude/**"],
   },
   ...obsidianmd.configs.recommended,
   {

@@ -42,11 +42,17 @@ Already-downloaded detection matches the formatted filename (`Title (FirstAuthor
 
 `linkPdf()` is the shared writer for the `pdf` property; the Zotero-PDF feature (#57) is meant to reuse it.
 
+## Per-canvas subfolder
+
+The download folder (setting, picker, or the canvas's `lastDownloadPath`) is a root: PDFs are written to `<root>/<canvas basename>`, built with `fileInFolder`, so the remembered path stays the root and the subfolder is derived at use. The picker's `downloaded` check and *Write summary*'s lookup search the canvas subfolder first and then the root itself, so PDFs saved before this change are still found; they are not moved. *Write summary* downloads missing PDFs into the default folder's canvas subfolder. Renaming a canvas starts a new subfolder; the old PDFs stay linked from notes by their wikilinks.
+
 ## Skipping the picker
 
 With exactly one paper targeted and a download folder already known (the `defaultDownloadPath` setting, else the canvas's `lastDownloadPath`), the command downloads without opening the picker. A modal offering back the single paper the user just selected, with a checkbox beside it, asks a question that has already been answered. The picker still opens for several papers, and whenever no folder is known, because that is the only place to enter one.
 
 ## History
+
+**2026-11-21 -- PDFs go in a per-canvas subfolder.** See *Per-canvas subfolder*.
 
 **2026-10-27 -- the setting beats the canvas's remembered folder.** The download command preferred `lastDownloadPath` over `defaultDownloadPath`, so a canvas that had downloaded once (for example into `papers`) kept using that folder after the user changed the setting. Order swapped in the download command; *Write summary* already downloaded into the setting and only searches the remembered folder.
 

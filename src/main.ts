@@ -2074,6 +2074,7 @@ export default class CitationGraphPlugin extends Plugin {
           this.app,
           modalPapers,
           knownPath,
+          activeFile.basename,
           adapter.getBasePath(),
         ).pickPapers();
         if (!result) return;
@@ -2094,7 +2095,7 @@ export default class CitationGraphPlugin extends Plugin {
       );
       const outcome = await downloadPapers(
         chosenPapers,
-        downloadPath,
+        fileInFolder(downloadPath, activeFile.basename),
         adapter,
         pluginDir,
         {
@@ -3291,7 +3292,7 @@ export default class CitationGraphPlugin extends Plugin {
       }
 
       const lastDownloadPath = canvasData.citationGraphMeta?.lastDownloadPath || "";
-      await this.summarizePapersWithPdfs(papers, lastDownloadPath);
+      await this.summarizePapersWithPdfs(papers, lastDownloadPath, activeFile.basename);
     } catch (e) {
       console.error("Citation Graph: Error writing summary", e);
       const msg = e instanceof Error ? e.message : String(e);
@@ -3312,6 +3313,7 @@ export default class CitationGraphPlugin extends Plugin {
   private async summarizePapersWithPdfs(
     papers: Paper[],
     downloadPath: string,
+    canvasName: string,
   ): Promise<void> {
     const adapter = this.fileSystemAdapter();
     if (!adapter) {
@@ -3321,12 +3323,15 @@ export default class CitationGraphPlugin extends Plugin {
 
     // 1. Resolve PDF paths for all papers. Both folders are vault folders;
     //    one stored by an earlier version may still name a folder outside the
-    //    vault, which is reported and skipped rather than read.
+    //    vault, which is reported and skipped rather than read. Downloads go
+    //    in a subfolder named after the canvas; the folder itself is still
+    //    searched for PDFs saved before that.
     const searchFolders: string[] = [];
     for (const raw of [downloadPath, this.settings.defaultDownloadPath]) {
       if (raw.trim() === "") continue;
       try {
-        searchFolders.push(vaultFolder(raw, adapter.getBasePath()));
+        const root = vaultFolder(raw, adapter.getBasePath());
+        searchFolders.push(fileInFolder(root, canvasName), root);
       } catch (e) {
         logNotice(e instanceof Error ? e.message : String(e), 10000);
       }
@@ -3359,7 +3364,7 @@ export default class CitationGraphPlugin extends Plugin {
       let downloadDir: string | null = null;
       try {
         downloadDir = this.settings.defaultDownloadPath
-          ? vaultFolder(this.settings.defaultDownloadPath, adapter.getBasePath())
+          ? fileInFolder(vaultFolder(this.settings.defaultDownloadPath, adapter.getBasePath()), canvasName)
           : null;
       } catch {
         // Already reported while building searchFolders.

@@ -188,11 +188,11 @@ The list lives in the canvas file, so it travels with the canvas. Review it, or 
 
 ### Write summary
 
-**Write summary finds the PDF** by looking for `Title (Author) (Year).pdf` in the canvas's last download folder and then in the default download folder, and offers to download it if it is missing, arXiv lookup included. It warns before summarising anything over ten pages, and asks whether to append or replace when a `## Summary` section already exists. It runs only when you ask for it: adding a paper to a canvas never starts a summary on its own.
+**Write summary finds the PDF** by looking for `Title (Author) (Year).pdf` in the canvas's subfolder of its last download folder and of the default download folder, and then directly in those folders (where PDFs were saved before per-canvas subfolders), and offers to download it if it is missing, arXiv lookup included. It warns before summarising anything over ten pages, and asks whether to append or replace when a `## Summary` section already exists. It runs only when you ask for it: adding a paper to a canvas never starts a summary on its own.
 
 ### Download
 
-**Download** saves as `Title (FirstAuthor) (Year).pdf` in a folder of your vault, created if it does not exist. With exactly one paper selected and a download folder already known (the *Default download folder* setting, or else the canvas's last one), it downloads straight away; otherwise it opens a picker where you choose the papers and the folder, with your vault's folders suggested as you type. Papers already in the folder are marked `downloaded` and left unchecked.
+**Download** saves as `Title (FirstAuthor) (Year).pdf` in a subfolder named after the canvas, inside the download folder you choose, so each canvas's PDFs stay together. For example, with the folder `Papers/PDFs`, papers from `Transformers.canvas` go in `Papers/PDFs/Transformers`. Both folders are created if they do not exist. With exactly one paper selected and a download folder already known (the *Default download folder* setting, or else the canvas's last one), it downloads straight away; otherwise it opens a picker where you choose the papers and the folder, with your vault's folders suggested as you type. Papers already in the canvas's subfolder, or directly in the download folder, are marked `downloaded` and left unchecked.
 
 **Each downloaded PDF is linked from its paper note**, as a `pdf` frontmatter property holding a wikilink such as `pdf: "[[Papers/PDFs/Title (Author) (Year).pdf]]"`, so the file opens from the note and Obsidian keeps the link current if you move or rename it. A `pdf` value already in the note is left as it is, so downloading again never adds a second link and never replaces one you set yourself. The note body also gets an *Open PDF* link to the same file, which shows on the paper's canvas card. See [Literature notes](#literature-notes). The same happens when *Write summary* downloads a missing PDF. Characters a wikilink cannot carry (`#`, `^`, `[`, `]`) are left out of the filename.
 
@@ -321,7 +321,7 @@ The provider chosen here is also the one *Recommend papers* uses.
 
 | Setting | Description | Default |
 |---|---|---|
-| **Default download folder** | Vault folder where PDFs are saved and where *Write summary* looks for them. To keep PDFs out of git or Obsidian Sync, see [Keeping PDFs out of version control or sync](#what-this-plugin-sends-reads-and-costs). It takes precedence over the folder a canvas remembers from its last download | |
+| **Default download folder** | Vault folder where PDFs are saved, each canvas's in a subfolder named after it, and where *Write summary* looks for them. To keep PDFs out of git or Obsidian Sync, see [Keeping PDFs out of version control or sync](#what-this-plugin-sends-reads-and-costs). It takes precedence over the folder a canvas remembers from its last download | |
 | **PDF viewer** | Where a PDF in the vault opens when you click a link to it, its canvas card or its name in the file list: *Obsidian* or *System default app*, the program your computer opens PDFs with. It applies to every PDF in the vault; PDFs embedded in a note still show inline | Obsidian |
 
 ### Banned papers
