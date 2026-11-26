@@ -549,8 +549,8 @@ export class CitationGraphSettingTab extends PluginSettingTab {
           this.textRow("defaultDownloadPath", {
             name: "Default download folder",
             desc:
-              "Vault folder where Write Summary looks for paper PDFs when the canvas's own download folder has no match, " +
-              "and where it downloads missing ones. PDFs are kept in the vault so the plugin only touches vault files. " +
+              "Vault folder where PDFs are downloaded, each canvas's in a subfolder named after it, and where Write Summary " +
+              "looks for them. PDFs are kept in the vault so the plugin only touches vault files. " +
               "If the vault is a git repository and you do not want PDFs committed, add this folder to its .gitignore.",
             placeholder: "Papers/PDFs",
             folder: true,

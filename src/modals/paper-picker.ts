@@ -1,6 +1,7 @@
 import { ButtonComponent } from "obsidian";
 import type { S2Paper } from "../types";
 import { PromiseModal } from "./promise-modal";
+import { paperLink } from "../api/paper-link";
 
 /** One row in a paper picker. Subclasses widen this with their own fields. */
 export interface PaperChoice {
@@ -218,6 +219,16 @@ export abstract class PaperPickerModal<C extends PaperChoice> extends PromiseMod
       meta.createSpan({
         text: `${authors}${authorSuffix} · ${choice.paper.year || "?"} · ${choice.paper.citationCount ?? "?"} citations`,
       });
+      const link = paperLink(choice.paper);
+      if (link) {
+        meta.appendText(" · ");
+        meta.createEl("a", {
+          text: link.label,
+          href: link.url,
+          cls: "external-link",
+          attr: { target: "_blank", rel: "noopener" },
+        });
+      }
 
       this.renderRowDetails(info, choice);
 

@@ -6,6 +6,22 @@ Each released version here is also the body of the matching [GitHub release](htt
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-11-26
+
+### Added
+
+- *Canvas: search papers* finds papers on the open canvas by title or author. Every match glows while the rest of the canvas fades, choosing a result zooms to it, and closing the search with Escape clears the highlights.
+- *Papers: add by DOI or arXiv* now zooms to the paper and makes it flash when the canvas already has it, instead of only saying so.
+- Each paper in the *Expand paper* and *Recommend papers* lists links to its arXiv page, or its publisher page through its DOI, so you can look a paper up before adding it.
+
+### Changed
+
+- Downloaded PDFs now go in a subfolder named after the canvas, inside the download folder, so each canvas's papers stay together. PDFs already saved directly in the download folder are still found by *Download* and *Write summary*, and are not moved.
+
+### Fixed
+
+- An abstract containing a very long unbroken string (such as raw markup) no longer makes the *Expand paper* and *Recommend papers* lists scroll sideways.
+
 ## [0.10.0] - 2026-10-27
 
 ### Added
@@ -199,7 +215,8 @@ First public release.
 - **Sync canvas to Zotero**, **Send papers to canvas**, **Relayout canvas**, **Delete paper**, and **Clear Semantic Scholar cache**.
 - Settings for the collections folder, the Zotero and Semantic Scholar API keys, node size, the five status colours, and the full LLM configuration.
 
-[Unreleased]: https://github.com/TheR4iner/obsidian-citation-graph/compare/0.10.0...HEAD
+[Unreleased]: https://github.com/TheR4iner/obsidian-citation-graph/compare/0.11.0...HEAD
+[0.11.0]: https://github.com/TheR4iner/obsidian-citation-graph/compare/0.10.0...0.11.0
 [0.10.0]: https://github.com/TheR4iner/obsidian-citation-graph/compare/0.9.0...0.10.0
 [0.9.0]: https://github.com/TheR4iner/obsidian-citation-graph/compare/0.8.0...0.9.0
 [0.8.0]: https://github.com/TheR4iner/obsidian-citation-graph/compare/0.7.2...0.8.0
